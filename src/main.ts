@@ -15,6 +15,7 @@ import {
   engineLoadHotSpots,
 } from "./engine/map";
 import { engineDoGame } from "./engine/game-loop";
+import { loadGameFont } from "./assets/fnt-cache";
 
 const canvas = document.getElementById("gameCanvas") as HTMLCanvasElement;
 const screen = new Screen(canvas);
@@ -43,9 +44,19 @@ async function loadGameData() {
       engineLoadEnems(prefs),
       engineLoadHotSpots(prefs),
     ]);
+  // Ensure FNT font is cached for HUD / game-over text
+  await loadGameFont("/GFX/lala.fnt").catch(() => null);
   console.log("[main] loadGameData: done");
   if (tilesetSheet.palette) screen.setPal(tilesetSheet.palette);
   else if (prefs.pal) screen.setPal(prefs.pal);
+
+  // Force HUD text colours (engineRprint uses 255=shadow, 254=foreground)
+  // to bright values so digits are always legible regardless of tileset palette.
+  const pal = screen.getPal();
+  pal[254 * 3] = 255; pal[254 * 3 + 1] = 255; pal[254 * 3 + 2] = 255; // 254 = white
+  pal[255 * 3] = 0;   pal[255 * 3 + 1] = 0;   pal[255 * 3 + 2] = 0;   // 255 = black
+  screen.setPal(pal);
+
   return { prefs, tileProperties, spriteProperties, spriteMapping, tilesetSheet, spritesetSheet, map, enems, hotSpots };
 }
 

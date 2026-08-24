@@ -2,6 +2,7 @@
 import type { TypePrefs, TypeTileLayers, TypeHotSpots, TypePlayer } from "./types";
 import type { Screen } from "../screen";
 import { LAYER_1 } from "../screen";
+import { getCachedFont } from "../assets/fnt-cache";
 
 /** Mirrors ENGINE.BAS: engineScreenDrawLayer1 — layer1 tiles → target (usually LAYER_2) */
 export function engineScreenDrawLayer1(
@@ -77,13 +78,45 @@ function makeNumber(digits: number, value: number): string {
 }
 
 /**
- * Very small 6×8 font stub for stats — Phase 7 doesn't have FNT yet,
- * so we render numbers via tiny filled boxes + DOM-style via screen primitives.
- * engineRprint = shadow (col 255) + foreground (254). Here we emulate via
- * filterBox-like rects if bmap missing, else simple rects.
- * For now we render `Text` as colored rectangles approximating chars.
- * Will be replaced by FNT blit in Phase 10.
+ * engineRprint — mirrors ENGINE.BAS engineRprint:
+ *   DQBprint Layer%, Text$, x% + 1, y% + 1, 255   (shadow)
+ *   DQBprint Layer%, Text$, x%, y%, 254             (foreground)
+ *
+ * Renders FNT glyphs with palette color.
+ * Falls back to colored rectangles if FNT not yet loaded.
  */
+function drawFntText(
+  screen: Screen,
+  layer: number,
+  text: string,
+  x: number,
+  y: number,
+  palCol: number,
+  font: NonNullable<ReturnType<typeof getCachedFont>>,
+): void {
+  let curX = x;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    const glyph = font.chars.get(code);
+    if (!glyph) { curX += (font.charWidth || 8); continue; }
+    const gh = glyph.height;
+    const gd = glyph.data;
+    const gw = glyph.width;
+    for (let gy = 0; gy < gh; gy++) {
+      const py = y + gy;
+      if (py < 0 || py >= 200) continue;
+      const row = gd[gy];
+      for (let gx = 0; gx < gw; gx++) {
+        if (row & (0x80 >> gx)) {
+          const px = curX + gx;
+          if (px >= 0 && px < 320) screen.putPixel(layer, px, py, palCol);
+        }
+      }
+    }
+    curX += gw;
+  }
+}
+
 export function engineRprint(
   screen: Screen,
   layer: number,
@@ -92,22 +125,44 @@ export function engineRprint(
   y: number,
   _fgCol: number = 254,
 ): void {
-  // Placeholder: draw each char as 6×8 solid block with palette 15/0 checker
-  // This is visible enough for HUD verification before FNT is ported.
-  // Later phases replace with proper FNT glyph blit.
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === " ") continue;
-    const cx = x + i * 7;
-    // Shadow
-    screen.fillRect(layer, cx + 1, y + 1, 6, 8, 255);
-    // Foreground — palette 15 white for stats
-    screen.fillRect(layer, cx, y, 6, 8, 15);
-    // Cheap glyph hint: char code mod pattern
-    const code = ch.charCodeAt(0);
-    if ((code & 1) === 0) screen.fillRect(layer, cx + 1, y + 2, 4, 1, 0);
-    else screen.fillRect(layer, cx + 1, y + 5, 4, 1, 0);
+  const font = getCachedFont();
+  if (!font) {
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === " ") continue;
+      const cx = x + i * 7;
+      screen.fillRect(layer, cx + 1, y + 1, 6, 8, 255);
+      screen.fillRect(layer, cx, y, 6, 8, 15);
+    }
+    return;
   }
+  drawFntText(screen, layer, text, x + 1, y + 1, 255, font);
+  drawFntText(screen, layer, text, x, y, 254, font);
+}
+
+/**
+ * dqbPrint — mirrors DirectQB DQBprint:
+ * Renders a single line of FNT text at (x, y) using the given palette colour.
+ * DirectQB FNT: each glyph is 8 bytes (rows), bits MSB-first = pixels.
+ */
+export function dqbPrint(
+  screen: Screen,
+  layer: number,
+  text: string,
+  x: number,
+  y: number,
+  palCol: number,
+): void {
+  const font = getCachedFont();
+  if (!font) {
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === " ") continue;
+      screen.fillRect(layer, x + i * 7, y, 6, 8, palCol);
+    }
+    return;
+  }
+  drawFntText(screen, layer, text, x, y, palCol, font);
 }
 
 /** Mirrors enginePrintStats — icons + counts */

@@ -10,66 +10,73 @@ export interface FontData {
   charWidth: number;
   charHeight: number;
   chars: Map<number, FontChar>;
+  charWidths: Uint8Array;
   palette: Uint8Array | null;
 }
 
+/**
+ * Loads DirectQB .FNT files.
+ * Format (from FONT.ASM DQBloadFont):
+ *   Offset 0:    2048 bytes — glyph bitmap (256 chars × 8 bytes, 8×8 rows)
+ *   Offset 2048: 257 bytes  — CharLen table (1 byte width per char + 1 extra)
+ *   Total: 2305 bytes
+ * No signature header.
+ */
 export class FNTLoader implements AssetLoader<FontData> {
   getName(): string {
     return 'FNT';
   }
 
   load(data: Uint8Array): FontData {
-    const signature = String.fromCharCode(data[0], data[1], data[2], data[3]);
-    if (signature !== 'FNT ') {
-      throw new Error('Invalid FNT file signature');
+    const GLYPH_SIZE = 2048;
+    const WIDTH_SIZE = 257;
+    const EXPECTED = GLYPH_SIZE + WIDTH_SIZE; // 2305
+
+    if (data.length < EXPECTED) {
+      throw new Error(`FNT: expected ${EXPECTED} bytes, got ${data.length}`);
     }
 
-    const charWidth = data[5];
-    const charHeight = data[6];
-    const charCount = data[7] | (data[8] << 8);
-
+    const charWidth = 8;
+    const charHeight = 8;
     const chars = new Map<number, FontChar>();
-    let offset = 16;
 
-    for (let i = 0; i < charCount; i++) {
-      const charCode = data[offset] | (data[offset + 1] << 8);
-      const charWidth = data[offset + 2];
-      const charHeight = data[offset + 3];
-      const dataOffset = data[offset + 4] | (data[offset + 5] << 8) | (data[offset + 6] << 16) | (data[offset + 7] << 24);
+    // Read 256 character bitmaps (8 bytes each)
+    for (let i = 0; i < 256; i++) {
+      const offset = i * 8;
+      const glyphData = data.slice(offset, offset + 8);
 
-      offset += 8;
-
-      const charData = new Uint8Array(charWidth * charHeight);
-      let dataIndex = 0;
-
-      for (let y = 0; y < charHeight; y++) {
-        for (let x = 0; x < charWidth; x++) {
-          if (dataOffset + y * charWidth + x < data.length) {
-            charData[dataIndex++] = data[dataOffset + y * charWidth + x];
+      // Calculate actual width from bitmap (rightmost non-zero column + 1)
+      let width = charWidth;
+      for (let col = charWidth - 1; col >= 0; col--) {
+        let hasPixel = false;
+        for (let row = 0; row < charHeight; row++) {
+          if (glyphData[row] & (1 << (7 - col))) {
+            hasPixel = true;
+            break;
           }
         }
+        if (hasPixel) { width = col + 1; break; }
+        if (col === 0) width = 0; // fully empty glyph
       }
+      // Use stored width if available, else bitmap-derived
+      const storedWidth = data[GLYPH_SIZE + i] || width;
 
-      chars.set(charCode, {
-        width: charWidth,
+      chars.set(i, {
+        width: storedWidth || charWidth,
         height: charHeight,
-        data: charData
+        data: glyphData,
       });
     }
 
-    let palette: Uint8Array | null = null;
-    if (data.length > offset) {
-      palette = new Uint8Array(256);
-      for (let i = 0; i < 256 && offset + i < data.length; i++) {
-        palette[i] = data[offset + i];
-      }
-    }
+    // Widths table
+    const charWidths = data.slice(GLYPH_SIZE, GLYPH_SIZE + 256);
 
     return {
       charWidth,
       charHeight,
       chars,
-      palette
+      charWidths,
+      palette: null,
     };
   }
 }

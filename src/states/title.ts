@@ -1,12 +1,34 @@
 /**
  * Phase 6 — Title screen (showTitle)
- * Shows TITLE.PCX, palette fade, blinking prompt.
+ * Shows TITLE.PCX, palette fade, "PRESS ENTER TO PLAY" prompt rendered
+ * on-canvas using FNT font + filterBox transparent shading.
  * Input: ANY keydown (Enter/Space/arrows/anything) or canvas click = start.
- * Does NOT depend on Keyboard class for input detection.
  */
 import { Screen, VIDEO, LAYER_1, LAYER_3 } from "../screen";
 import { PCXLoader } from "../assets/PCXLoader";
+import { loadGameFont } from "../assets/fnt-cache";
+import { dqbPrint } from "../engine/render";
 import type { MusicPlayer } from "../audio/music-player";
+
+/** BMA blender map for filterBox — cached after first fetch */
+let _bmaCache: Uint8Array | null = null;
+async function getBma(): Promise<Uint8Array> {
+  if (_bmaCache) return _bmaCache;
+  try {
+    const r = await fetch("/GFX/LALA.BMA");
+    if (r.ok) {
+      const buf = new Uint8Array(await r.arrayBuffer());
+      if (buf.length >= 65536) { _bmaCache = buf; return buf; }
+    }
+  } catch { /* ignore */ }
+  // Mock darken fallback
+  const bma = new Uint8Array(65536);
+  for (let fg = 0; fg < 256; fg++)
+    for (let bg = 0; bg < 256; bg++)
+      bma[(fg << 8) | bg] = bg === 255 ? (fg * 0.6) | 0 : fg;
+  _bmaCache = bma;
+  return bma;
+}
 
 function blitPcxToLayer(
   screen: Screen,
@@ -49,16 +71,22 @@ export async function showTitle(
   const musicPath = opts?.musicPath ?? "/MUSIC/G66A.ogg";
   const fadeFrames = opts?.fadeFrames ?? 16;
 
-  // ---- Load TITLE.PCX ----
-  let titlePcx: { width: number; height: number; data: Uint8Array; palette: Uint8Array | null } | null = null;
-  try {
-    const r = await fetch(titlePath);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    titlePcx = new PCXLoader().load(new Uint8Array(await r.arrayBuffer()));
-    console.log(`[title] loaded ${titlePcx.width}x${titlePcx.height}`);
-  } catch (e) {
-    console.warn("[title] TITLE.PCX load failed", e);
-  }
+  // ---- Load TITLE.PCX + FNT font in parallel ----
+  const [titlePcx] = await Promise.all([
+    (async () => {
+      try {
+        const r = await fetch(titlePath);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const pcx = new PCXLoader().load(new Uint8Array(await r.arrayBuffer()));
+        console.log(`[title] loaded ${pcx.width}x${pcx.height}`);
+        return pcx;
+      } catch (e) {
+        console.warn("[title] TITLE.PCX load failed", e);
+        return null;
+      }
+    })(),
+    loadGameFont("/GFX/lala.fnt").catch(() => null),
+  ]);
 
   screen.clearLayer(LAYER_3);
   screen.clearLayer(LAYER_1);
@@ -93,36 +121,10 @@ export async function showTitle(
     }).catch(() => {});
   }
 
-  // ---- BMA for filterBox ----
-  let bma: Uint8Array | null = null;
-  try {
-    const r = await fetch("/GFX/LALA.BMA");
-    if (r.ok) {
-      const buf = new Uint8Array(await r.arrayBuffer());
-      if (buf.length >= 65536) bma = buf;
-    }
-  } catch { /* ignore */ }
-  if (!bma) {
-    bma = new Uint8Array(65536);
-    for (let fg = 0; fg < 256; fg++)
-      for (let bg = 0; bg < 256; bg++)
-        bma[(fg << 8) | bg] = bg === 255 ? (fg * 0.6) | 0 : fg;
-  }
+  // ---- Pre-load BMA for filterBox (blocks briefly, ~instant from cache) ----
+  const bma = await getBma();
 
-  // ---- DOM overlay text ----
-  const overlay = document.createElement("div");
-  overlay.style.cssText =
-    "position:fixed;left:50%;top:52%;transform:translate(-50%,-50%);" +
-    "font:14px monospace;font-weight:bold;letter-spacing:2px;text-align:center;" +
-    "user-select:none;z-index:10;pointer-events:none;";
-  overlay.innerHTML =
-    '<div style="color:#000;transform:translate(1px,1px)">PRESS ENTER TO PLAY</div>' +
-    '<div style="color:#0f0;margin-top:-14px">PRESS ENTER TO PLAY</div>' +
-    '<div style="color:#fff;font-size:10px;margin-top:4px;opacity:0.7">(or click / any key)</div>';
-  overlay.style.display = "none";
-  document.body.appendChild(overlay);
-
-  // ---- Wait for input, then resolve ----
+  // ---- Wait for input, render "PRESS ENTER TO PLAY" each frame ----
   console.log("[title] waiting for input");
 
   return new Promise<ShowTitleResult>((resolve) => {
@@ -136,12 +138,10 @@ export async function showTitle(
       resolve({ reason: "enter" });
     }
 
-    // ANY keyboard key = start
     function onKeyDown(e: KeyboardEvent) {
       e.preventDefault();
       start();
     }
-    // Canvas click = start
     function onClick() {
       start();
     }
@@ -152,35 +152,29 @@ export async function showTitle(
     document.addEventListener("click", onClick);
     screen.canvas.addEventListener("touchstart", onClick, { passive: true });
 
-    let frame = 0;
-    let shown = true;
     let raf = 0;
 
     function onFrame() {
       if (resolved) return;
-      frame++;
 
-      // Blink prompt every 32 frames
-      const shouldShow = (Math.floor(frame / 32) % 2) === 0;
-      if (shouldShow !== shown) {
-        shown = shouldShow;
-        overlay.style.display = shown ? "block" : "none";
-        screen.copyLayer(LAYER_3, LAYER_1);
-        screen.copyLayer(LAYER_1, VIDEO);
-        if (shown) {
-          screen.filterBox(VIDEO, 80, 136, 239, 151, 255, bma!);
-        }
-        screen.present();
-      }
+      // Redraw title background each frame (clean slate for filterBox)
+      screen.copyLayer(LAYER_3, LAYER_1);
 
-      if (frame % 60 === 0) screen.present();
+      // FilterBox + text (matches QB: DQBfilterBox 1, 80, 136, 239, 151, 255, 1)
+      screen.filterBox(LAYER_1, 80, 136, 239, 151, 255, bma);
+      // Shadow: DQBprint 1, "PRESS ENTER TO PLAY", 89, 141, 0
+      dqbPrint(screen, LAYER_1, "PRESS ENTER TO PLAY", 89, 141, 0);
+      // Foreground: DQBprint 1, "PRESS ENTER TO PLAY", 88, 140, 1
+      dqbPrint(screen, LAYER_1, "PRESS ENTER TO PLAY", 88, 140, 1);
+
+      screen.copyLayer(LAYER_1, VIDEO);
+      screen.present();
 
       raf = requestAnimationFrame(onFrame);
     }
 
     raf = requestAnimationFrame(onFrame);
 
-    // Focus canvas
     screen.canvas.tabIndex = 0;
     screen.canvas.focus();
     window.focus();
@@ -192,9 +186,6 @@ export async function showTitle(
       screen.canvas.removeEventListener("click", onClick);
       document.removeEventListener("click", onClick);
       screen.canvas.removeEventListener("touchstart", onClick);
-      overlay.remove();
-      // NOTE: palette fade handled by caller (main.ts), not here —
-      // fire-and-forget fadeTo here raced with caller's fadeOut/fadeIn.
     }
   });
 }
