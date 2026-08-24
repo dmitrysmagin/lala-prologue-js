@@ -1,8 +1,9 @@
-import { Screen, VIDEO, LAYER_1, LAYER_2 } from "./screen";
+import { Screen } from "./screen";
 import { Keyboard } from "./keyboard";
 import { showTitle } from "./states/title";
 import { MusicPlayer } from "./audio/music-player";
 import { createDefaultPrefs } from "./engine/prefs";
+import { createPlayer } from "./engine/prefs";
 import { createCurScreenBuff } from "./engine/types";
 import {
   engineLoadTileProperties,
@@ -13,10 +14,8 @@ import {
   engineMapLoad,
   engineLoadEnems,
   engineLoadHotSpots,
-  engineScreenPrepare,
-  engineScreenDrawLayer1,
-  engineScreenDrawLayer2,
 } from "./engine/map";
+import { engineDoGame } from "./engine/game-loop";
 
 const canvas = document.getElementById("gameCanvas") as HTMLCanvasElement;
 const screen = new Screen(canvas);
@@ -28,29 +27,17 @@ hud.style.cssText = "position:fixed;bottom:8px;left:50%;transform:translateX(-50
 hud.textContent = "Init…";
 document.body.appendChild(hud);
 
-async function main() {
+async function startup() {
   canvas.tabIndex = 0;
   canvas.focus();
   canvas.addEventListener("click", () => canvas.focus());
-
   await music.init().catch(() => {});
+}
 
-  // ---- Phase 6 — Title screen (blocks until Enter) ----
-  hud.textContent = "Title — press Enter";
-  console.log("Phase 6: showTitle");
-  const res = await showTitle(screen, keyboard, music, { titlePath: "/GFX/TITLE.PCX", musicPath: "/MUSIC/G66A.OGG", fadeFrames: 12 });
-  console.log(`Title exited: ${res.reason}`);
-  await music.fadeOut(300).catch(() => {});
-  hud.textContent = "Loading game…";
-  // Brief black fade already done in title; ensure screen is black
-  await screen.fadeTo(0, 0, 0, 6).catch(() => {});
-
-  // ---- Phase 5 wiring — load engine data (reused for title→game transition) ----
+async function loadGameData() {
   const prefs = createDefaultPrefs();
-  // Phase 6->7 expects G66A for title, DESORUIN for game; swap bgM now
-  prefs.bgM = "DESORUIN.OGG";
-
-  const [tileProperties, spriteProps, spriteMapping, tilesetSheet, spritesetSheet, map, _enems, hotSpots] =
+  // Game music is DESORUIN, title is G66A per prefs — keep prefs.bgM for loop, but swap as needed
+  const [tileProperties, spriteProperties, spriteMapping, tilesetSheet, spritesetSheet, map, enems, hotSpots] =
     await Promise.all([
       engineLoadTileProperties(prefs),
       engineLoadSpriteProperties(prefs),
@@ -61,88 +48,111 @@ async function main() {
       engineLoadEnems(prefs),
       engineLoadHotSpots(prefs),
     ]);
-
   if (tilesetSheet.palette) screen.setPal(tilesetSheet.palette);
   else if (prefs.pal) screen.setPal(prefs.pal);
+  return { prefs, tileProperties, spriteProperties, spriteMapping, tilesetSheet, spritesetSheet, map, enems, hotSpots };
+}
 
-  const tileset = { width: tilesetSheet.width, height: tilesetSheet.height, data: tilesetSheet.data };
-  const spriteset = { width: spritesetSheet.width, height: spritesetSheet.height, data: spritesetSheet.data };
+async function main() {
+  await startup();
 
-  // Prepare initial screen (iniPant 24)
+  // Pre-load shared data once (palette, map, tiles) — reused across title↔game loops
+  hud.textContent = "Loading…";
+  const data = await loadGameData();
+  const player = createPlayer(data.prefs);
   const curScreenBuff = createCurScreenBuff();
-  let nPant = prefs.iniPant;
-  let frame = 0;
-  function prepare(n: number) {
-    engineScreenPrepare(n, tileProperties as any, map as any, curScreenBuff as any, prefs as any, hotSpots as any);
+
+  // Outer full loop: Title → Play → (Ending) → Title
+  // For Phase 7, Ending not yet; loop Title↔Game
+  while (true) {
+    // ---- Title ----
+    hud.textContent = "Title — press Enter";
+    const titleRes = await showTitle(screen, keyboard, music, {
+      titlePath: "/GFX/TITLE.PCX",
+      musicPath: "/MUSIC/G66A.OGG",
+      fadeFrames: 12,
+    });
+    console.log(`title -> ${titleRes.reason}`);
+    await music.fadeOut(250).catch(() => {});
+    await screen.fadeTo(0, 0, 0, 8).catch(() => {});
+    keyboard.clear();
+    screen.clearLayer(0); screen.clearLayer(1); screen.clearLayer(2); screen.clearLayer(3);
+
+    // ---- Game ----
+    // Reset player per engineInitGame / engineInitPlayer
+    const prefs = data.prefs;
+    // Re-init player for new game
+    const fresh = createPlayer(prefs);
+    Object.assign(player, fresh);
+    player.lives = prefs.initialLives;
+    player.keys = 0; player.objects = 0; player.gameOver = 0;
+    // Restore hotspots s flags (they were mutated)
+    for (const hs of data.hotSpots) hs.s = true;
+    // Palette already set to tileset; fade in
+    await screen.fadeIn(screen.getPal().length ? screen.getPal() : data.tilesetSheet.palette!, 10);
+    try {
+      const r = await fetch("/MUSIC/DESORUIN.OGG", { method: "HEAD" });
+      if (r.ok) await music.loadSong("/MUSIC/DESORUIN.OGG");
+      else console.warn("Game music OGG missing — muted");
+    } catch { /* muted */ }
+
+    hud.textContent = `Game — pant ${prefs.iniPant} ←/→/↑ / Ctrl  W+E+R cheat`;
+
+    const tileset = { width: data.tilesetSheet.width, height: data.tilesetSheet.height, data: data.tilesetSheet.data, palette: data.tilesetSheet.palette };
+    const spriteset = { width: data.spritesetSheet.width, height: data.spritesetSheet.height, data: data.spritesetSheet.data, palette: data.spritesetSheet.palette };
+
+    const res = await engineDoGame({
+      screen,
+      keyboard,
+      prefs,
+      tileProperties: data.tileProperties,
+      spriteProperties: data.spriteProperties,
+      spriteMapping: data.spriteMapping,
+      tileset,
+      spriteset,
+      map: data.map,
+      enems: data.enems,
+      hotSpots: data.hotSpots,
+      player,
+      curScreenBuff,
+      flag: 1,
+      onFrame: ({ nPant, frame }) => {
+        if (frame % 60 === 0) {
+          hud.textContent =
+            `Game — pant ${nPant} (${nPant % prefs.mapW},${Math.floor(nPant / prefs.mapW)}) frame ${frame & 3} ` +
+            `| obj ${player.objects}/${prefs.maxObjs} keys ${player.keys} lives ${player.lives} | Enter→Title`;
+        }
+      },
+    });
+
+    console.log(`engineDoGame returned ${res}`);
+    await music.fadeOut(300).catch(() => {});
+    await screen.fadeTo(0, 0, 0, 10).catch(() => {});
+    music.stop();
+    keyboard.clear();
+
+    if (res === -1) {
+      hud.textContent = "You win! (Ending Phase 11 not yet) — returning to title…";
+      await new Promise<void>((r) => setTimeout(r, 1500));
+      // Will loop to title again; Phase 11 will show ending instead
+      continue;
+    }
+    if (res === -2) {
+      hud.textContent = "Game Over — returning to title…";
+      await new Promise<void>((r) => setTimeout(r, 1500));
+      continue;
+    }
+    if (res === 0 || res === -3) {
+      // ESC / -3 — back to title
+      continue;
+    }
   }
-  prepare(nPant);
-  await screen.fadeIn(screen.getPal().length ? screen.getPal() : tilesetSheet.palette!, 12);
-
-  // Try to start game music (DESORUIN) — if OGG missing, mute gracefully
-  try {
-    const r = await fetch("/MUSIC/DESORUIN.OGG", { method: "HEAD" });
-    if (r.ok) await music.loadSong("/MUSIC/DESORUIN.OGG");
-    else console.warn("Game music OGG not found — muted (run adplay→ffmpeg pipeline)");
-  } catch { /* muted */ }
-
-  // ---- Minimal game-start placeholder (Phase 7 will replace with engineDoGame loop) ----
-  // Render map + player sprite stub + stats, allow ←/→ to change screen for verification
-  keyboard.clear();
-  canvas.focus();
-  hud.textContent = `Game started — pant ${nPant} (←/→ to switch, Enter returns to title)`;
-
-  let rafId = 0;
-  const loop = () => {
-    frame++;
-
-    // Input — allow return to title on Enter (demo of startup flow loop)
-    if (keyboard.isDown(0x1c)) { // Enter
-      keyboard.clear();
-      cancelAnimationFrame(rafId);
-      music.stop();
-      // Restart title loop recursively
-      main().catch(console.error);
-      return;
-    }
-    // Screen switching demo (not yet full collision, just map view)
-    if (frame % 12 === 0) {
-      if (keyboard.isDown(0x4b) && nPant > 0) { nPant--; prepare(nPant); }
-      else if (keyboard.isDown(0x4d) && nPant < prefs.mapW * prefs.mapH - 1) { nPant++; prepare(nPant); }
-    }
-
-    screen.clearLayer(LAYER_1);
-    screen.clearLayer(LAYER_2);
-    screen.clearLayer(VIDEO);
-
-    // DQBcopyLayer backdrop stub (clear) → draw layer1
-    engineScreenDrawLayer1(screen as any, tileset as any, prefs as any, curScreenBuff as any, LAYER_1);
-    // Player stub at iniTX/TY
-    const px = prefs.iniTX * 16;
-    const py = prefs.iniTY * 16;
-    const sid = spriteMapping[0] ?? 0;
-    screen.blitSprite(LAYER_1, spriteset as any, sid, prefs.screenPos.x + px, prefs.screenPos.y + py, spriteProps as any);
-    // Layer2 animated on top
-    engineScreenDrawLayer2(screen as any, tileset as any, prefs as any, curScreenBuff as any, frame & 3, LAYER_1);
-    screen.copyLayer(LAYER_1, VIDEO);
-
-    // HUD stats placeholder (original enginePrintStats draws 3 icons + numbers)
-    // Keep DOM hud for now; don't spam filterBox here.
-
-    screen.present();
-    hud.textContent =
-      `Game — pant ${nPant} (${nPant % prefs.mapW},${Math.floor(nPant / prefs.mapW)}) frame ${frame & 3} | tiles ${prefs.numTiles} sprites ${prefs.numSprites} ` +
-      `| hotSpot ${prefs.hotSpotX},${prefs.hotSpotY} | Enter→Title  ←/→ switch`;
-
-    rafId = requestAnimationFrame(loop);
-  };
-  rafId = requestAnimationFrame(loop);
-  console.log(`Phase 6 complete — title → game transition live. Title returned "${res.reason}", game pant ${nPant} ready.`);
 }
 
 main().catch((e) => {
   console.error(e);
   hud.textContent = `Error: ${(e as Error).message}`;
-  screen.clearLayer(VIDEO);
-  screen.fillRect(VIDEO, 0, 0, 320, 200, 4);
+  screen.clearLayer(0);
+  screen.fillRect(0, 0, 0, 320, 200, 4);
   screen.present();
 });

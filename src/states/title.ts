@@ -73,26 +73,15 @@ export async function showTitle(
     console.warn("showTitle: TITLE.PCX load failed, using placeholder", e);
   }
 
-  // Palette handling — TITLE pal is canonical for title screen (QB loads pal from PCX)
-  let savedPal: Uint8Array | null = null;
-  if (titlePcx?.palette) {
-    // Save current pal to restore later if needed, then fade in title pal
-    savedPal = screen.getPal();
-    screen.palOff();
-    screen.present();
-    // Install palette but start black for fadeIn
-    // We call fadeIn which starts from black — give it the target pal directly
-    await screen.fadeIn(titlePcx.palette, fadeFrames);
-  } else if (titlePcx === null) {
-    // Placeholder palette — already set
-  }
-
-  // Prepare layers
+  // Prepare layers first (so fade has content to fade)
   screen.clearLayer(LAYER_3);
   screen.clearLayer(LAYER_1);
   screen.clearLayer(VIDEO);
 
   if (titlePcx) {
+    // Install palette directly (8-bit) before blit so pixels have correct indices,
+    // but start from black for fade
+    if (titlePcx.palette) screen.setPal(titlePcx.palette);
     blitPcxToLayer(screen, LAYER_3, titlePcx, 0, 0, true);
   } else {
     // Placeholder: checker + border
@@ -104,7 +93,22 @@ export async function showTitle(
   // QB: DQBcopyLayer 3,1 → DQBcopyLayer 1,VIDEO
   screen.copyLayer(LAYER_3, LAYER_1);
   screen.copyLayer(LAYER_1, VIDEO);
-  screen.present();
+
+  // Palette handling — fade from black to title pal (QB loads pal from PCX)
+  let savedPal: Uint8Array | null = null;
+  if (titlePcx?.palette) {
+    savedPal = titlePcx.palette; // keep for fadeIn target
+    // Start from black and fade in the already-blitted image
+    const target = titlePcx.palette;
+    screen.palOff();
+    screen.refreshAllFromIndices();
+    screen.present();
+    await screen.fadeIn(target, fadeFrames);
+    // Ensure final image is fully visible after fade
+    screen.present();
+  } else {
+    screen.present();
+  }
 
   // ---- Music ----
   let musicFailed = false;
@@ -142,11 +146,13 @@ export async function showTitle(
   // Create DOM overlay for text (since LALA.FNT renderer is Phase 11)
   const overlay = document.createElement("div");
   overlay.style.cssText =
-    "position:fixed;left:50%;top:52%;transform:translate(-50%,-50%);pointer-events:none;" +
-    "font: 14px monospace; font-weight:bold; letter-spacing:2px; text-align:center;";
+    "position:fixed;left:50%;top:52%;transform:translate(-50%,-50%);pointer-events:auto;cursor:pointer;" +
+    "font: 14px monospace; font-weight:bold; letter-spacing:2px; text-align:center; user-select:none;";
+  overlay.title = "Click or press Enter to play";
   overlay.innerHTML =
     `<div style="color:#000;transform:translate(1px,1px)">PRESS ENTER TO PLAY</div>` +
-    `<div style="color:#0f0;margin-top:-14px">PRESS ENTER TO PLAY</div>`;
+    `<div style="color:#0f0;margin-top:-14px">PRESS ENTER TO PLAY</div>` +
+    `<div style="color:#fff;font-size:10px;margin-top:4px;opacity:0.7">(or click / Space)</div>`;
   overlay.style.display = "none";
   document.body.appendChild(overlay);
 
@@ -172,6 +178,19 @@ export async function showTitle(
   keyboard.clear();
   let frame = 0;
   let shown = true;
+  let enterViaClick = false;
+  const onOverlayClick = () => { enterViaClick = true; };
+  overlay.addEventListener("click", onOverlayClick);
+  screen.canvas.addEventListener("click", onOverlayClick);
+  // Extra safety: window-level Enter/Space listener (independent of Keyboard class)
+  const onWindowKey = (e: KeyboardEvent) => {
+    if (e.key === "Enter" || e.code === "Enter" || e.code === "NumpadEnter" || e.key === " ") {
+      enterViaClick = true;
+    }
+  };
+  window.addEventListener("keydown", onWindowKey);
+
+  console.log("showTitle: waiting for Enter (or click/Space). Canvas focus:", document.activeElement?.id);
 
   return await new Promise<ShowTitleResult>((resolve) => {
     const onFrame = () => {
@@ -202,7 +221,20 @@ export async function showTitle(
       // Keep VIDEO refreshed each frame (for palette fade stability)
       if (frame % 60 === 0) screen.present();
 
-      if (keyboard.isDown(SC_ENTER) || keyboard.readKey() === SC_ENTER) {
+      const enterDown =
+        keyboard.isDown(SC_ENTER) ||
+        keyboard.isDownCode("Enter") ||
+        keyboard.isDownCode("NumpadEnter") ||
+        keyboard.isDown(0x39) || // Space scancode fallback
+        keyboard.peekKey() === SC_ENTER ||
+        keyboard.peekInkey() === "\r" ||
+        enterViaClick;
+
+      if (enterDown) {
+        // Consume queue so next screen doesn't see stale Enter
+        keyboard.readKey();
+        keyboard.inkey();
+        console.log("showTitle: Enter detected", { isDown: keyboard.isDown(SC_ENTER), peek: keyboard.peekKey(), viaClick: enterViaClick });
         cleanup();
         resolve({ reason: "enter" });
         return;
@@ -218,6 +250,9 @@ export async function showTitle(
 
     const cleanup = () => {
       cancelAnimationFrame(raf);
+      overlay.removeEventListener("click", onOverlayClick);
+      screen.canvas.removeEventListener("click", onOverlayClick);
+      window.removeEventListener("keydown", onWindowKey);
       overlay.remove();
       // Fade out title before returning (like QB palette fade)
       // Don't await here — caller will transition
@@ -229,8 +264,10 @@ export async function showTitle(
     };
 
     let raf = requestAnimationFrame(onFrame);
-    // Ensure keyboard focus
+    // Ensure keyboard focus — do next tick as well (browser may need user gesture)
     const c = document.getElementById("gameCanvas") as HTMLCanvasElement | null;
-    if (c) { c.tabIndex = 0; c.focus(); }
+    if (c) { c.tabIndex = 0; c.focus(); setTimeout(() => c.focus(), 100); }
+    // Also focus window
+    window.focus();
   });
 }

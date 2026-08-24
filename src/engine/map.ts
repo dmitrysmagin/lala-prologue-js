@@ -82,12 +82,13 @@ export async function engineLoadSpriteMapping(
   return out;
 }
 
+import { PCXLoader } from "../assets/PCXLoader";
+
 /** TILESET / SPRITESET — thin wrappers around PCX; return sheet for Screen.blit* */
 export async function engineLoadTileset(
   prefs: TypePrefs,
   base: string = "",
 ): Promise<{ width: number; height: number; data: Uint8Array; palette: Uint8Array | null }> {
-  const { PCXLoader } = await import("../assets/PCXLoader");
   const bytes = await fetchBytes(`${base}GFX/${prefs.tilesetFile}`);
   const img = new PCXLoader().load(bytes);
   if (img.palette) prefs.pal = img.palette;
@@ -98,7 +99,6 @@ export async function engineLoadSpriteset(
   prefs: TypePrefs,
   base: string = "",
 ): Promise<{ width: number; height: number; data: Uint8Array; palette: Uint8Array | null }> {
-  const { PCXLoader } = await import("../assets/PCXLoader");
   const bytes = await fetchBytes(`${base}GFX/${prefs.spritesetFile}`);
   const img = new PCXLoader().load(bytes);
   // Spriteset palette typically same as tileset; keep first loaded pal if already set

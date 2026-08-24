@@ -19,6 +19,7 @@ const CODE_TO_SCANCODE: Record<string, number> = {
   ControlLeft:  SC_CTRL,
   ControlRight: SC_CTRL,
   Enter:        SC_ENTER,
+  NumpadEnter:  SC_ENTER,
   ArrowLeft:    SC_LEFT,
   ArrowUp:      SC_UP,
   ArrowRight:   SC_RIGHT,
@@ -57,7 +58,10 @@ export class Keyboard {
   constructor(target: Window | HTMLElement = window) {
     this.target = target;
     this.onKeyDown = (e: KeyboardEvent) => {
-      const sc = CODE_TO_SCANCODE[e.code];
+      let sc = CODE_TO_SCANCODE[e.code];
+      // Fallback: if code not mapped but key is Enter, treat as SC_ENTER (covers some IME/layouts)
+      if (sc === undefined && e.key === "Enter") sc = SC_ENTER;
+      if (sc === undefined && e.key === " ") sc = 0x39;
       if (sc === undefined) return;
       // Always queue the scancode press (even if held) — but avoid repeat flooding for char queue
       // Pressed set tracks physical held state
@@ -92,7 +96,9 @@ export class Keyboard {
     };
 
     this.onKeyUp = (e: KeyboardEvent) => {
-      const sc = CODE_TO_SCANCODE[e.code];
+      let sc = CODE_TO_SCANCODE[e.code];
+      if (sc === undefined && e.key === "Enter") sc = SC_ENTER;
+      if (sc === undefined && e.key === " ") sc = 0x39;
       if (sc === undefined) return;
       this.pressed.delete(sc);
     };
