@@ -220,6 +220,142 @@ export class Screen {
   }
 
   // -------------------------------------------------------------------------
+  // Phase 3 — Sprite / tile blitter
+  // -------------------------------------------------------------------------
+
+  /**
+   * Generic sheet type — compatible with PCXImage from assets.
+   * `data` is a flat 8-bit indexed buffer (palette index per pixel).
+   */
+  private blitSheet(
+    layerId: number,
+    sheet: { width: number; height: number; data: Uint8Array },
+    tileW: number,
+    tileH: number,
+    tileIndex: number,
+    dx: number,
+    dy: number,
+    offsetX: number,
+    offsetY: number,
+    transparent: boolean,
+  ): void {
+    this.assertLayer(layerId);
+    const cols = Math.floor(sheet.width / tileW);
+    if (cols <= 0) throw new Error(`blitSheet: sheet width ${sheet.width} < tileW ${tileW}`);
+    const sx0 = (tileIndex % cols) * tileW;
+    const sy0 = Math.floor(tileIndex / cols) * tileH;
+    if (sy0 + tileH > sheet.height) return; // out of bounds tile — no-op
+
+    // Apply sprite offset (from SPRPROP.TXT) before clipping
+    const dstX0 = dx + offsetX;
+    const dstY0 = dy + offsetY;
+
+    const lut = this.paletteLut;
+    const dstIdx = this.layerIdx[layerId];
+    const dstU32 = this.layerU32[layerId];
+    const src = sheet.data;
+    const sheetW = sheet.width;
+
+    for (let y = 0; y < tileH; y++) {
+      const py = dstY0 + y;
+      if (py < 0 || py >= SCREEN_HEIGHT) continue;
+      const dstRow = py * SCREEN_WIDTH;
+      const srcRow = (sy0 + y) * sheetW + sx0;
+      for (let x = 0; x < tileW; x++) {
+        const px = dstX0 + x;
+        if (px < 0 || px >= SCREEN_WIDTH) continue;
+        const pal = src[srcRow + x];
+        if (transparent && pal === 0) continue; // DQBsetTransPut
+        const di = dstRow + px;
+        dstIdx[di] = pal;
+        dstU32[di] = lut[pal];
+      }
+    }
+  }
+
+  /** Copy a 16×16 tile. Index 0 is transparent (skipped). */
+  blitTile(
+    layerId: number,
+    tileset: { width: number; height: number; data: Uint8Array },
+    tileIndex: number,
+    screenX: number,
+    screenY: number,
+  ): void {
+    this.blitSheet(layerId, tileset, 16, 16, tileIndex, screenX, screenY, 0, 0, true);
+  }
+
+  /** Solid (no transparency) tile — mirrors DQBsetSolidPut */
+  blitTileSolid(
+    layerId: number,
+    tileset: { width: number; height: number; data: Uint8Array },
+    tileIndex: number,
+    screenX: number,
+    screenY: number,
+  ): void {
+    this.blitSheet(layerId, tileset, 16, 16, tileIndex, screenX, screenY, 0, 0, false);
+  }
+
+  /**
+   * Copy a 24×24 sprite with optional per-sprite offset (from SPRPROP.TXT).
+   * `spriteProps` is an array indexed by spriteIndex containing {offX, offY}.
+   * Transparency: palette index 0 skipped (DQBsetTransPut).
+   */
+  blitSprite(
+    layerId: number,
+    spriteset: { width: number; height: number; data: Uint8Array },
+    spriteIndex: number,
+    screenX: number,
+    screenY: number,
+    spriteProps?: { offX: number; offY: number }[],
+  ): void {
+    const off = spriteProps?.[spriteIndex] ?? { offX: 0, offY: 0 };
+    this.blitSheet(layerId, spriteset, 24, 24, spriteIndex, screenX, screenY, off.offX, off.offY, true);
+  }
+
+  /**
+   * Copy a rectangle between layers (or within same layer).
+   * Mirrors DQBput / DQBget semantics: copies both indexed and RGBA buffers.
+   * Source and dest rectangles are clipped to screen bounds.
+   */
+  blitFromLayer(
+    srcLayer: number,
+    dstLayer: number,
+    sx: number,
+    sy: number,
+    sw: number,
+    sh: number,
+    dx: number,
+    dy: number,
+  ): void {
+    this.assertLayer(srcLayer);
+    this.assertLayer(dstLayer);
+    if (sw <= 0 || sh <= 0) return;
+
+    const srcIdx = this.layerIdx[srcLayer];
+    const srcU32 = this.layerU32[srcLayer];
+    const dstIdx = this.layerIdx[dstLayer];
+    const dstU32 = this.layerU32[dstLayer];
+
+    // Clip source rect to source bounds and dest to screen — simple per-pixel bounds check
+    for (let y = 0; y < sh; y++) {
+      const sy2 = sy + y;
+      const dy2 = dy + y;
+      if (sy2 < 0 || sy2 >= SCREEN_HEIGHT || dy2 < 0 || dy2 >= SCREEN_HEIGHT) continue;
+      const sRow = sy2 * SCREEN_WIDTH;
+      const dRow = dy2 * SCREEN_WIDTH;
+      for (let x = 0; x < sw; x++) {
+        const sx2 = sx + x;
+        const dx2 = dx + x;
+        if (sx2 < 0 || sx2 >= SCREEN_WIDTH || dx2 < 0 || dx2 >= SCREEN_WIDTH) continue;
+        const si = sRow + sx2;
+        const di = dRow + dx2;
+        dstIdx[di] = srcIdx[si];
+        dstU32[di] = srcU32[si];
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Palette system
   // -------------------------------------------------------------------------
 
