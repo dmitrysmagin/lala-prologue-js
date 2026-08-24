@@ -108,15 +108,26 @@ export class Keyboard {
 
   private attach(): void {
     if (this.attached) return;
-    this.target.addEventListener("keydown", this.onKeyDown as EventListener);
-    this.target.addEventListener("keyup", this.onKeyUp as EventListener);
+    const t = this.target as Window & typeof globalThis;
+    t.addEventListener("keydown", this.onKeyDown as EventListener);
+    t.addEventListener("keyup", this.onKeyUp as EventListener);
+    // Also listen on document for cases where window doesn't get focus (iframe, canvas focus)
+    if (typeof document !== "undefined") {
+      document.addEventListener("keydown", this.onKeyDown as EventListener, true);
+      document.addEventListener("keyup", this.onKeyUp as EventListener, true);
+    }
     this.attached = true;
   }
 
   detach(): void {
     if (!this.attached) return;
-    this.target.removeEventListener("keydown", this.onKeyDown as EventListener);
-    this.target.removeEventListener("keyup", this.onKeyUp as EventListener);
+    const t = this.target as Window & typeof globalThis;
+    t.removeEventListener("keydown", this.onKeyDown as EventListener);
+    t.removeEventListener("keyup", this.onKeyUp as EventListener);
+    if (typeof document !== "undefined") {
+      document.removeEventListener("keydown", this.onKeyDown as EventListener, true);
+      document.removeEventListener("keyup", this.onKeyUp as EventListener, true);
+    }
     this.attached = false;
   }
 
