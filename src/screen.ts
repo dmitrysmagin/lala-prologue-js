@@ -22,23 +22,19 @@ export const NUM_LAYERS = 4;
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a 768-byte VGA palette (R,G,B each 0-63) to a Uint32Array(256)
- * RGBA lookup table. Stored as little-endian 0xAABBGGRR-compatible with
- * ImageData's Uint32 view: R | G<<8 | B<<16 | 0xFF<<24.
- * VGA values are scaled 63 → 255 via (v * 255 / 63) ≈ (v << 2) | (v >> 4).
+ * Convert a 768-byte palette (R,G,B each 0-255, or 0-63 if already expanded
+ * by setPal) to a Uint32Array(256) RGBA lookup. Little-endian:
+ * R | G<<8 | B<<16 | 0xFF<<24. No scaling here — scaling for 6-bit VGA
+ * palettes is done once in setPal/fadeIn.
  */
 export function paletteBytesToRgba(pal: Uint8Array): Uint32Array {
   if (pal.length < 768) throw new Error(`paletteBytesToRgba: expected 768 bytes, got ${pal.length}`);
   const lut = new Uint32Array(256);
   for (let i = 0; i < 256; i++) {
-    const r6 = pal[i * 3];
-    const g6 = pal[i * 3 + 1];
-    const b6 = pal[i * 3 + 2];
-    // Scale 0-63 → 0-255 (.5 rounding)
-    const r = (r6 * 255 / 63) | 0;
-    const g = (g6 * 255 / 63) | 0;
-    const b = (b6 * 255 / 63) | 0;
-    lut[i] = (r & 0xff) | ((g & 0xff) << 8) | ((b & 0xff) << 16) | (0xff << 24);
+    const r = pal[i * 3] & 0xff;
+    const g = pal[i * 3 + 1] & 0xff;
+    const b = pal[i * 3 + 2] & 0xff;
+    lut[i] = r | (g << 8) | (b << 16) | (0xff << 24);
   }
   return lut;
 }
