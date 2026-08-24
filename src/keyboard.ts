@@ -10,6 +10,7 @@ export const SC_ENTER = 0x1C;
 export const SC_LEFT  = 0x4B;
 export const SC_UP    = 0x48;
 export const SC_RIGHT = 0x4D;
+export const SC_DOWN  = 0x50;
 export const SC_W     = 0x11;
 export const SC_E     = 0x12;
 export const SC_R     = 0x13;

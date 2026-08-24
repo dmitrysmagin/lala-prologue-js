@@ -1,10 +1,12 @@
 /** Phase 7 — Core game loop (engineDoGame) — minimal viable, stubs for player/enemies pending Phases 8-9 */
 import { Screen, VIDEO, LAYER_1, LAYER_2, LAYER_3 } from "../screen";
-import { Keyboard, SC_LEFT, SC_RIGHT, SC_UP, SC_W, SC_E, SC_R, SC_ENTER, SC_CTRL } from "../keyboard";
+import { Keyboard, SC_ENTER, SC_W, SC_E, SC_R } from "../keyboard";
 import type { TypePrefs, TypePlayer, TypeTileLayers, TypeHotSpots, TypeEnems } from "./types";
 import { createCurScreenBuff } from "./types";
 import { engineScreenPrepare } from "./map";
 import { engineScreenDrawLayer1, engineScreenDrawLayer2, engineDrawHotSpots, enginePrintStats, engineRprint } from "./render";
+import { engineMovePlayer } from "./player";
+import { engineDetectCollision } from "./collision";
 import { PCXLoader } from "../assets/PCXLoader";
 
 /**
@@ -135,26 +137,36 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
     subFrame = (subFrame + 1) & 3;
     if (subFrame === 0) { frame = (frame + 1) & 3; if (frame === 4) frame = 0; }
 
-    // --- Stubs for Phase 8/9 (will be replaced) ---
-    // engineMovePlayer / engineMoveEnems not yet; we emulate attempt via arrow keys for navigation demo
-    // For now, if player.attempt is already set (e.g., by test), honor it; otherwise map arrow keys to attempt
-    if (flag && player.attempt === 0) {
-      // Lightweight manual navigation for Phase 7 demo (before physics):
-      // Hold Ctrl+Arrow gives attempt, else no move — mirrors original but without physics
-      const ctrl = keyboard.isDown(SC_CTRL) || keyboard.isDown(SC_UP);
-      void ctrl;
-      // Simple edge-simulation: if at edge and pressing direction, set attempt
-      // We keep player at screen center, so demo navigation is via explicit Left/Right keys:
-      // Map SC_LEFT/RIGHT to attempt DLEFT/DRIGHT for manual screen walk
-      if (keyboard.isDown(SC_LEFT) && frame % 10 === 0) player.attempt = 1; // DLEFT
-      else if (keyboard.isDown(SC_RIGHT) && frame % 10 === 0) player.attempt = 2; // DRIGHT
-      else if (keyboard.isDown(SC_UP) && frame % 10 === 0) player.attempt = 3; // DUP
-      // Down via Ctrl+Down? Use W as down for demo
-      else if (keyboard.isDown(SC_W) && frame % 10 === 0) player.attempt = 4; // DDOWN
+    // --- Player physics (Phase 8) ---
+    if (flag && !player.gameOver) {
+      engineMovePlayer(keyboard, curScreenBuff, player, prefs, map);
     }
 
-    // --- Move stubs ---
-    // (player physics in Phase 8, enemies in Phase 9)
+    // --- Enemy movement + collision (Phase 9, partial) ---
+    if (flag && halfLife) {
+      for (let i = 0; i < prefs.nEnems; i++) {
+        const e = enems[nPant]?.[i];
+        if (!e || e.t === 0) continue;
+        // Move
+        e.x += e.mx;
+        e.y += e.my;
+        // Bounce at patrol boundaries
+        if (e.x === e.x1 || e.x === e.x2) e.mx = -e.mx;
+        if (e.y === e.y1 || e.y === e.y2) e.my = -e.my;
+        // Platform type: skip damage collision (handled separately in Phase 9)
+        if (e.t === prefs.enemPlat) continue;
+        // Damage collision
+        if (engineDetectCollision(i, nPant, enems, player)) {
+          player.state = 1; // STATEFLICKER
+          player.ctState = 128;
+          // Knockback: away from enemy
+          player.vx = e.mx > 0 ? -(prefs.walkVxMax << 1) : (prefs.walkVxMax << 1);
+          player.vy = e.my > 0 ? -(prefs.walkVxMax << 1) : (prefs.walkVxMax << 1);
+          player.lives--;
+          // sfx: HIT (slot 2) + AH (slot 8) — stubbed
+        }
+      }
+    }
 
     // --- Screen transition ---
     if (player.attempt && flag) {
@@ -194,26 +206,34 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
       }
     }
 
-    // --- Animation frames ---
-    // engineCalcPlayerFrame / engineCalcEnemsFrame stubs:
-    // For Phase 7, just cycle player sprId via mapping if available
-    if (player) {
-      // Minimal frame update so sprite isn't static
-      player.subFrame = (player.subFrame + 1) & 3;
-      if (player.subFrame === 0) player.frame = (player.frame + 1) & 3;
-      if (spriteMapping.length > 0) {
-        const base = player.facing; // 0 right, 6 left
-        const idx = base + player.frame;
-        if (idx < spriteMapping.length) player.sprId = spriteMapping[idx] ?? player.sprId;
+    // --- Animation frames (ENGINE.BAS:35-53) ---
+    if (player && spriteMapping.length > 0) {
+      // Player frame calculation
+      if (player.vy < 0) {
+        // Jumping up
+        player.sprId = spriteMapping[player.facing + 4] ?? player.sprId;
+      } else if (player.vy > 0) {
+        // Falling
+        player.sprId = spriteMapping[player.facing + 5] ?? player.sprId;
+      } else if (player.vx !== 0) {
+        // Walking — cycle frames
+        player.sprId = spriteMapping[player.facing + player.frame] ?? player.sprId;
+        player.subFrame = (player.subFrame + 1) & 3;
+        if (player.subFrame === 0) {
+          player.frame = (player.frame + 1) & 3;
+        }
+      } else {
+        // Standing still
+        player.sprId = spriteMapping[player.facing] ?? player.sprId;
       }
     }
-    // Enems frame stub: cycle t>0 enems
+    // Enemy frame calculation (ENGINE.BAS:20-33)
     for (let i = 0; i < prefs.nEnems; i++) {
       const e = enems[nPant]?.[i];
       if (!e || e.t === 0) continue;
       e.subFrame = (e.subFrame + 1) & 3;
       if (e.subFrame === 0) e.frame = (e.frame + 1) & 3;
-      if (e.mx + e.my > 0) e.facing = 0; else e.facing = 4;
+      e.facing = (e.mx + e.my > 0) ? 0 : 4;
       const sid = 12 + ((e.t - 1) << 3) + e.facing + e.frame;
       if (sid < spriteMapping.length) e.sprId = spriteMapping[sid] ?? e.sprId;
     }
