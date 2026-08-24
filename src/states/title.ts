@@ -193,7 +193,8 @@ export async function showTitle(
       document.removeEventListener("click", onClick);
       screen.canvas.removeEventListener("touchstart", onClick);
       overlay.remove();
-      screen.fadeTo(0, 0, 0, 10).catch(() => {});
+      // NOTE: palette fade handled by caller (main.ts), not here —
+      // fire-and-forget fadeTo here raced with caller's fadeOut/fadeIn.
     }
   });
 }

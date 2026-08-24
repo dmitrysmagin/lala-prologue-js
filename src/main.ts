@@ -106,7 +106,7 @@ async function main() {
     player.gameOver = 0;
     for (const hs of data.hotSpots) hs.s = true;
 
-    await screen.fadeIn(screen.getPal().length ? screen.getPal() : data.tilesetSheet.palette!, 10);
+    await screen.fadeIn(data.tilesetSheet.palette!, 10);
     try {
       const r = await fetch("/MUSIC/DESORUIN.ogg", { method: "HEAD" });
       if (r.ok) await music.loadSong("/MUSIC/DESORUIN.ogg");
