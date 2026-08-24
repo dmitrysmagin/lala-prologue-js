@@ -133,17 +133,20 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
   while (running) {
     // --- Frame pacing ---
     await nextFrame();
-    halfLife = 1 - halfLife;
-    subFrame = (subFrame + 1) & 3;
-    if (subFrame === 0) { frame = (frame + 1) & 3; if (frame === 4) frame = 0; }
+    halfLife = (halfLife + 1) & 3;
+    // Layer2 animation — half speed of game logic
+    if ((halfLife & 1) === 0) {
+      subFrame = (subFrame + 1) & 3;
+      if (subFrame === 0) { frame = (frame + 1) & 3; if (frame === 4) frame = 0; }
+    }
 
-    // --- Player physics (Phase 8) — every other frame (halfLife) ---
-    if (flag && !player.gameOver && halfLife) {
+    // --- Player physics (Phase 8) — every 4th frame ---
+    if (flag && !player.gameOver && halfLife === 0) {
       engineMovePlayer(keyboard, curScreenBuff, player, prefs, map);
     }
 
     // --- Enemy movement + collision (Phase 9, partial) ---
-    if (flag && halfLife) {
+    if (flag && halfLife === 0) {
       for (let i = 0; i < prefs.nEnems; i++) {
         const e = enems[nPant]?.[i];
         if (!e || e.t === 0) continue;
@@ -206,8 +209,8 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
       }
     }
 
-    // --- Animation frames (ENGINE.BAS:35-53) ---
-    if (player && spriteMapping.length > 0) {
+    // --- Animation frames (ENGINE.BAS:35-53) — synced with game logic ---
+    if (flag && halfLife === 0 && player && spriteMapping.length > 0) {
       // Player frame calculation
       if (player.vy < 0) {
         // Jumping up
@@ -228,14 +231,16 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
       }
     }
     // Enemy frame calculation (ENGINE.BAS:20-33)
-    for (let i = 0; i < prefs.nEnems; i++) {
-      const e = enems[nPant]?.[i];
-      if (!e || e.t === 0) continue;
-      e.subFrame = (e.subFrame + 1) & 3;
-      if (e.subFrame === 0) e.frame = (e.frame + 1) & 3;
-      e.facing = (e.mx + e.my > 0) ? 0 : 4;
-      const sid = 12 + ((e.t - 1) << 3) + e.facing + e.frame;
-      if (sid < spriteMapping.length) e.sprId = spriteMapping[sid] ?? e.sprId;
+    if (halfLife === 0) {
+      for (let i = 0; i < prefs.nEnems; i++) {
+        const e = enems[nPant]?.[i];
+        if (!e || e.t === 0) continue;
+        e.subFrame = (e.subFrame + 1) & 3;
+        if (e.subFrame === 0) e.frame = (e.frame + 1) & 3;
+        e.facing = (e.mx + e.my > 0) ? 0 : 4;
+        const sid = 12 + ((e.t - 1) << 3) + e.facing + e.frame;
+        if (sid < spriteMapping.length) e.sprId = spriteMapping[sid] ?? e.sprId;
+      }
     }
 
     // --- Render ---
@@ -244,8 +249,8 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
     if (!player.gameOver) {
       const px = player.x >> 6;
       const py = player.y >> 6;
-      // Flicker state: blink every other halfLife when STATEFLICKER
-      const showPlayer = player.state === 0 || halfLife === 0;
+      // Flicker state: blink at ~15Hz when STATEFLICKER
+      const showPlayer = player.state === 0 || (halfLife & 1) === 0;
       if (showPlayer) {
         const sid = player.sprId;
         const off = spriteProperties[sid] ?? { offX: 0, offY: 0 };
