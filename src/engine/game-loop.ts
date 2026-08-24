@@ -1,4 +1,4 @@
-/** Phase 7 — Core game loop (engineDoGame) — minimal viable, stubs for player/enemies pending Phases 8-9 */
+/** Phase 7 — Core game loop (engineDoGame) */
 import { Screen, VIDEO, LAYER_1, LAYER_2, LAYER_3 } from "../screen";
 import { Keyboard, SC_ENTER, SC_W, SC_E, SC_R } from "../keyboard";
 import type { TypePrefs, TypePlayer, TypeTileLayers, TypeHotSpots, TypeEnems } from "./types";
@@ -6,7 +6,7 @@ import { createCurScreenBuff } from "./types";
 import { engineScreenPrepare } from "./map";
 import { engineScreenDrawLayer1, engineScreenDrawLayer2, engineDrawHotSpots, enginePrintStats, engineRprint } from "./render";
 import { engineMovePlayer } from "./player";
-import { engineDetectCollision } from "./collision";
+import { engineMoveEnems } from "./enemies";
 import { PCXLoader } from "../assets/PCXLoader";
 
 /**
@@ -145,30 +145,9 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
       engineMovePlayer(keyboard, curScreenBuff, player, prefs, map);
     }
 
-    // --- Enemy movement + collision (Phase 9, partial) ---
+    // --- Enemy AI + platform riding + collision (Phase 9) ---
     if (flag && halfLife === 0) {
-      for (let i = 0; i < prefs.nEnems; i++) {
-        const e = enems[nPant]?.[i];
-        if (!e || e.t === 0) continue;
-        // Move
-        e.x += e.mx;
-        e.y += e.my;
-        // Bounce at patrol boundaries
-        if (e.x === e.x1 || e.x === e.x2) e.mx = -e.mx;
-        if (e.y === e.y1 || e.y === e.y2) e.my = -e.my;
-        // Platform type: skip damage collision (handled separately in Phase 9)
-        if (e.t === prefs.enemPlat) continue;
-        // Damage collision
-        if (engineDetectCollision(i, nPant, enems, player)) {
-          player.state = 1; // STATEFLICKER
-          player.ctState = 128;
-          // Knockback: away from enemy
-          player.vx = e.mx > 0 ? -(prefs.walkVxMax << 1) : (prefs.walkVxMax << 1);
-          player.vy = e.my > 0 ? -(prefs.walkVxMax << 1) : (prefs.walkVxMax << 1);
-          player.lives--;
-          // sfx: HIT (slot 2) + AH (slot 8) — stubbed
-        }
-      }
+      engineMoveEnems(enems, curScreenBuff, prefs, player, nPant);
     }
 
     // --- Screen transition ---
