@@ -50,10 +50,22 @@ async function loadGameData() {
 }
 
 async function main() {
+  // ---- Banner: force user click so AudioContext can start legally ----
+  const banner = document.getElementById("startBanner");
+  if (banner) {
+    await new Promise<void>((resolve) => {
+      banner.addEventListener("click", () => {
+        // Create AudioContext INSIDE the gesture handler — Chrome requires this.
+        music.init().catch(() => {});
+        banner.remove();
+        resolve();
+      }, { once: true });
+    });
+  }
+
   canvas.tabIndex = 0;
   canvas.focus();
   canvas.addEventListener("click", () => canvas.focus());
-  await music.init().catch(() => {});
 
   // Show title IMMEDIATELY — game data loads in parallel
   console.log("[main] showing title immediately");
@@ -61,7 +73,7 @@ async function main() {
 
   const titlePromise = showTitle(screen, keyboard, music, {
     titlePath: "/GFX/TITLE.PCX",
-    musicPath: "/MUSIC/G66A.OGG",
+    musicPath: "/MUSIC/G66A.ogg",
     fadeFrames: 12,
   });
 
@@ -96,8 +108,8 @@ async function main() {
 
     await screen.fadeIn(screen.getPal().length ? screen.getPal() : data.tilesetSheet.palette!, 10);
     try {
-      const r = await fetch("/MUSIC/DESORUIN.OGG", { method: "HEAD" });
-      if (r.ok) await music.loadSong("/MUSIC/DESORUIN.OGG");
+      const r = await fetch("/MUSIC/DESORUIN.ogg", { method: "HEAD" });
+      if (r.ok) await music.loadSong("/MUSIC/DESORUIN.ogg");
     } catch { /* muted */ }
 
     hud.textContent = `Game — pant ${prefs.iniPant} | ←/→/↑ / Ctrl  W+E+R cheat`;
@@ -141,7 +153,7 @@ async function main() {
 
     const titleRes2 = await showTitle(screen, keyboard, music, {
       titlePath: "/GFX/TITLE.PCX",
-      musicPath: "/MUSIC/G66A.OGG",
+      musicPath: "/MUSIC/G66A.ogg",
       fadeFrames: 12,
     });
     console.log(`[main] title -> ${titleRes2.reason}`);

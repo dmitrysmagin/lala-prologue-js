@@ -46,7 +46,7 @@ export async function showTitle(
   opts?: { titlePath?: string; musicPath?: string; fadeFrames?: number },
 ): Promise<ShowTitleResult> {
   const titlePath = opts?.titlePath ?? "/GFX/TITLE.PCX";
-  const musicPath = opts?.musicPath ?? "/MUSIC/G66A.OGG";
+  const musicPath = opts?.musicPath ?? "/MUSIC/G66A.ogg";
   const fadeFrames = opts?.fadeFrames ?? 16;
 
   // ---- Load TITLE.PCX ----

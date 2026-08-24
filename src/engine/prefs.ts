@@ -4,7 +4,7 @@ import { STATENORMAL } from "./types";
 
 /**
  * Mirrors ENGINE.BAS:engineInitVals — prefsStore(2) with prefsStore(0) populated.
- * Updated per porting plan: bgM is now .OGG (converted via adplay → wav → ogg).
+ * Updated per porting plan: bgM is now .ogg (adplay → wav → ogg via libvorbis).
  */
 export function engineInitVals(): TypePrefs[] {
   const prefsStore: TypePrefs[] = [];
@@ -50,7 +50,7 @@ export function engineInitVals(): TypePrefs[] {
     refill: 1,
     hotSpotX: 999,
     hotSpotY: 999,
-    bgM: "DESORUIN.OGG",
+    bgM: "DESORUIN.ogg",
     bgL1: 9,
     bgL2: 10,
   };
