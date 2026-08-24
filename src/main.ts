@@ -1,6 +1,7 @@
 import { Screen } from "./screen";
 import { Keyboard } from "./keyboard";
 import { showTitle } from "./states/title";
+import { showEnding } from "./states/ending";
 import { MusicPlayer } from "./audio/music-player";
 import { createDefaultPrefs, createPlayer } from "./engine/prefs";
 import { createCurScreenBuff } from "./engine/types";
@@ -158,7 +159,13 @@ async function main() {
     music.stop();
     keyboard.clear();
 
-    // Show title again — reuse same parallel pattern
+    // Win → show ending before returning to title
+    if (res === -1) {
+      await showEnding(screen, music);
+      await screen.fadeTo(0, 0, 0, 10).catch(() => {});
+    }
+
+    // Show title again
     console.log("[main] returning to title");
     hud.textContent = "Title — press Enter / click";
 
