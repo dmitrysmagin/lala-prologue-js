@@ -9,7 +9,7 @@ lala-js/
 ├── public/               # Static game assets (copied from lala-qb/)
 │   ├── GFX/              # PCX images, FNT font, BMA blender map, TXT data
 │   ├── MAP/              # LALA.MAP, TILEPROP.TXT, ENEMS.TXT, HOTSPOTS.TXT
-│   ├── MUSIC/            # S3M tracker files (DESORUIN, G66A, MC12, EFFECTS)
+│   ├── MUSIC/            # OGG music (converted from S3M: DESORUIN, G66A, MC12, EFFECTS)
 │   └── SFX/              # WAV sound effects (10 files)
 ├── src/
 │   ├── main.ts           # Entry point — init, game loop
@@ -17,9 +17,7 @@ lala-js/
 │   ├── keyboard.ts       # Scancode-based keyboard input
 │   ├── assets.ts         # All loaders: PCX, FNT, BMA, MAP, TXT, WAV
 │   ├── audio/
-│   │   ├── music-player.ts      # Main-thread AudioWorkletNode controller
-│   │   ├── s3m-format.ts        # S3M parser (ported from FMENGINE.BAS)
-│   │   ├── s3m-worklet.ts       # AudioWorkletProcessor (runs OPL3 + S3M)
+│   │   ├── music-player.ts      # HTMLAudio / Web Audio OGG playback (loop, volume)
 │   │   └── sound-effects.ts     # WAV playback via Web Audio API
 │   ├── engine/
 │   │   ├── types.ts             # TypePrefs, TypePlayer, TypeTileLayers, etc.
@@ -33,8 +31,6 @@ lala-js/
 │   └── states/
 │       ├── title.ts             # showTitle — title screen
 │       └── ending.ts            # showEnding — ending sequence
-├── lib/
-│   └── opl3.js                  # Pure-JS OPL3/YMF262 emulator (from external project)
 ├── index.html
 ├── package.json
 ├── tsconfig.json
@@ -146,7 +142,7 @@ Files created: `src/engine/types.ts`, `src/engine/prefs.ts`, `src/engine/map.ts`
 
 Port `showTitle`:
 - Load `TITLE.PCX` onto layer 3, copy to layer 1 (→ `VIDEO`)
-- Start music (`G66A.S3M` — send to AudioWorklet)
+- Start music (`G66A.OGG` — converted from `G66A.S3M` via `adplay` → WAV → OGG; play via `MusicPlayer.loadSong()`)
 - Call `engineDoGame` with `flag=0` (title mode — renders "PRESS ENTER TO PLAY")
 - On Enter key, return to main loop which starts real game
 - All palette fade effects
@@ -273,7 +269,7 @@ Files created: `src/engine/enemies.ts`, `src/engine/collision.ts`
 
 Port `showEnding`:
 - Load `ENDING.PCX` onto layer 3, copy to layer 1
-- Start music (`MC12.S3M`)
+- Start music (`MC12.OGG` — converted from `MC12.S3M`)
 - Display ending text letter-by-letter (8×16 font chars) with darken/brighten filter box effect
 - Timing: 32-frame initial pause, 8-frame delay per character, 120-frame pause between two text passes
 - Wait for keypress → return to main menu
@@ -283,106 +279,65 @@ Files created: `src/states/ending.ts`
 
 ---
 
-### Phase 12 — Sound via OPL3 emulation + AudioWorklet (`step-12`)
+### Phase 12 — Sound via pre-rendered OGG + Web Audio (`step-12`)
 
-**Overview:** Use `lib/opl3.js` (pure-JS YMF262 emulator) as the OPL3 chip replacement. Run the S3M sequencer and chip together inside an `AudioWorkletProcessor` for zero-latency audio.
+**Design change (2026-08-24):** Original plan used `lib/opl3.js` + ported `FMENGINE.BAS` + `AudioWorklet` to synthesize S3M at runtime. To simplify the sound engine, all `.S3M` music is now **pre-converted to `.OGG`** offline. No OPL3 emulation or S3M parsing at runtime.
+
+**Conversion pipeline (offline, one-time):**
+1. `adplay` (AdLib player) renders each `.S3M` → `.WAV` via OPL3 emulation: `adplay -o foo.wav MUSIC/*.S3M`
+2. WAV → OGG (Vorbis) via `ffmpeg`/`oggenc`: `ffmpeg -i foo.wav -c:a libvorbis -q:a 4 foo.ogg` (or `oggenc foo.wav`)
+3. Resulting files placed in `public/MUSIC/*.ogg` (e.g. `DESORUIN.OGG`, `G66A.OGG`, `MC12.OGG`, `EFFECTS.OGG`). Original `.S3M` files are kept in `lala-qb/` for reference but not shipped.
 
 **Files:**
 
 | File | Purpose |
 |------|---------|
-| `lib/opl3.js` | OPL3 chip emulator (external, drop-in) |
-| `src/audio/s3m-format.ts` | S3M parser + sequencer (ported from `FMENGINE.BAS`) |
-| `src/audio/s3m-worklet.ts` | `AudioWorkletProcessor` — owns OPL3 + S3MFormat, generates samples |
-| `src/audio/music-player.ts` | Main-thread controller: loads songs, sends to worklet |
-| `src/audio/sound-effects.ts` | WAV playback via standard Web Audio API |
+| `src/audio/music-player.ts` | OGG music playback (HTMLAudioElement or Web Audio `AudioBufferSourceNode`, loop + volume + fade) |
+| `src/audio/sound-effects.ts` | WAV playback via Web Audio API (unchanged) |
 
-**`s3m-format.ts`** — port of Bisqwit's `FMENGINE.BAS` (879 lines):
+No `lib/opl3.js`, no `s3m-format.ts`, no `s3m-worklet.ts`.
 
-1. **S3M binary parsing:**
-   - Read header at offset 0x21: `ordnum`, `insnum`, `patnum`
-   - Read at 0x32: `effectA` (frames per row), `effectT` (ticks per frame)
-   - Read order list from 0x61
-   - For each instrument: read 12 OPL3 patch bytes (registers 0x20–0xE3), volume, C4 speed
-   - For each pattern: read pointer, seek to offset, read packed pattern data
-
-2. **Sequencer (`update`):**
-   - Same logic as `FMtimer` in QB: tick counter, row advancement, pattern loading from disk (in-memory in JS)
-   - Each tick: call `FMplayrowfrom` on current pattern position → parse note/instrument/volume/effect → apply to OPL3 channels
-   - Support all effects: `A` (set speed), `B` (position jump), `C` (pattern break), `D`/`K` (volume slide), `E`/`F` (pitch slide), `H` (vibrato), `S` (sub-effects: loop/note delay/note cut/pattern delay)
-   - `refresh()` returns `fwait` (seconds per tick) for AudioWorklet timing
-
-3. **OPL3 register writes:**
-   - `FMwrite(reg, val)` → `this.opl.write(0, reg, val)` instead of `OUT &H388, reg; OUT &H389, val`
-   - `FMtouch` → set operator volumes via OPL3
-   - `FMupdate` → write all patch bytes + key-on for a channel
-   - `FMnoteoff` → clear key-on bit
-
-**`s3m-worklet.ts`** — runs inside `AudioWorkletGlobalScope`:
-
-```ts
-import OPL3 from "../lib/opl3";
-import { S3MFormat } from "./s3m-format";
-
-class S3MWorkletProcessor extends AudioWorkletProcessor {
-  private player: { format: S3MFormat; chunkSize: number } | null = null;
-
-  constructor() {
-    super();
-    this.port.onmessage = (e) => {
-      if (e.data.cmd === "load") {
-        const opl = new OPL3();
-        const format = new S3MFormat(opl);
-        format.load(new Uint8Array(e.data.buffer));
-        this.player = { format, chunkSize: 0 };
-      }
-    };
-  }
-
-  process(inputs: Float32Array[][], outputs: Float32Array[][]) {
-    if (!this.player) return true;
-    const out = outputs[0]; // [left, right]
-    for (let i = 0; i < out[0].length; i++) {
-      if (this.player.chunkSize <= 0) {
-        this.player.format.update();
-        this.player.chunkSize = (sampleRate * this.player.format.refresh()) | 0;
-      }
-      // Read one stereo frame from OPL3
-      (this.player.format as any).opl.read([out[0][i], out[1][i]], 0);
-      this.player.chunkSize--;
-    }
-    return true;
-  }
-}
-
-registerProcessor("s3m-opl3-processor", S3MWorkletProcessor);
-```
-
-**`music-player.ts`** — main thread:
+**`music-player.ts`** — simple OGG player:
 
 ```ts
 class MusicPlayer {
-  private ctx: AudioContext;
-  private worklet: AudioWorkletNode | null = null;
+  private audio = new Audio();
+  private ctx: AudioContext | null = null;
+
+  constructor() {
+    this.audio.loop = true;
+    this.audio.preload = "auto";
+  }
 
   async init() {
-    this.ctx = new AudioContext();
-    await this.ctx.audioWorklet.addModule("/js/s3m-worklet.js");
-    this.worklet = new AudioWorkletNode(this.ctx, "s3m-opl3-processor");
-    this.worklet.connect(this.ctx.destination);
+    // Optional Web Audio for volume/fade control; fallback to <audio> alone
+    try { this.ctx = new AudioContext(); } catch { /* muted */ }
   }
 
   loadSong(url: string) {
-    fetch(url).then(r => r.arrayBuffer()).then(buf => {
-      this.worklet!.port.postMessage({ cmd: "load", buffer: buf }, [buf]);
-    });
+    // url is now "/MUSIC/G66A.OGG" etc.
+    this.audio.src = url;
+    this.audio.play().catch(() => {/* autoplay blocked until user gesture */});
   }
 
-  stop() { this.ctx.close(); }
+  stop() { this.audio.pause(); this.audio.currentTime = 0; }
+  setVolume(v: number) { this.audio.volume = v; }
+  fadeOut(ms = 500) { /* ramp volume → 0 then stop() */ }
 }
 ```
 
-**`sound-effects.ts`** — separate from OPL3:
+Web Audio variant (if precise sync/volume needed):
+```ts
+async loadSong(url: string) {
+  const buf = await fetch(url).then(r => r.arrayBuffer());
+  const decoded = await this.ctx!.decodeAudioData(buf);
+  const src = this.ctx!.createBufferSource();
+  src.buffer = decoded; src.loop = true;
+  src.connect(this.ctx!.destination); src.start();
+}
+```
+
+**`sound-effects.ts`** — unchanged from original plan:
 
 ```ts
 class SoundEffects {
@@ -405,10 +360,10 @@ class SoundEffects {
 **PlaySound frequency mapping:**
 - `DQBplaySound(slot, voice, freq, loop)` → `playbackRate = freq / 11025` (original Sound Blaster sample rate)
 
-**Game integration:**
-- `FMload("MUSIC/foo.S3M")` → `musicPlayer.loadSong("/MUSIC/foo.S3M")`
-- `FMplayeffect(idx)` → load specific row from `EFFECTS.S3M` pattern bank
-- `BeSilent()` → write 0 to all OPL3 registers
+**Game integration (updated):**
+- `FMload("MUSIC/foo.S3M")` → `musicPlayer.loadSong("/MUSIC/foo.OGG")`
+- `FMplayeffect(idx)` → if `EFFECTS` was split per-effect, `musicPlayer.playOneShot("/MUSIC/EFFECTS_XX.OGG")`; if kept as single file, short HTMLAudio clip with `currentTime` seek or separate pre-split OGGs
+- `BeSilent()` → `musicPlayer.stop()`
 - `DQBplaySound(n, voice, freq, loop)` → `sfx.play(n, loop)` with pitch
 
 ---
@@ -439,7 +394,7 @@ class SoundEffects {
 | Sprite size | 24×24 pixels | Same |
 | Keyboard | INT 9h ISR, scancode-based | `keydown`/`keyup` events, scancode map |
 | Sound FX | Sound Blaster DMA, 32 voices | Web Audio API, AudioBufferSourceNode |
-| Music | OPL3/AdLib via port I/O (0x388) | `lib/opl3.js` chip emulation + ported S3M player in AudioWorklet |
+| Music | OPL3/AdLib via port I/O (0x388) | Pre-rendered OGG Vorbis (converted offline via `adplay` → WAV → `ffmpeg`/`oggenc`); playback via `HTMLAudioElement` / Web Audio `AudioBufferSourceNode` (loop, volume, fade). No runtime OPL3/S3M. |
 | Timing | `DQBwait(1)` = VSync (60fps) | `requestAnimationFrame` with counter |
 | Datafiles | PCX, binary MAP, TXT | Fetch → typed arrays → parsed in TS |
-| S3M format | Read from disk per row (QB memory limit) | Load entire file into memory, no on-demand disk I/O needed |
+| S3M format | Read from disk per row (QB memory limit) | Converted offline to OGG; no runtime S3M parsing. Original `.S3M` retained in `lala-qb/` for reference. |

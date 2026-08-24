@@ -16,7 +16,9 @@ export class AssetManager {
       return this.assets.get(path);
     }
 
-    const response = await fetch(`/public/${path}`);
+    // Vite serves `public/` at site root, so `/GFX/foo` not `/public/GFX/foo`
+    const url = path.startsWith("/") ? path : `/${path}`;
+    const response = await fetch(url);
     const arrayBuffer = await response.arrayBuffer();
     const data = new Uint8Array(arrayBuffer);
 
