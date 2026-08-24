@@ -137,8 +137,8 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
     subFrame = (subFrame + 1) & 3;
     if (subFrame === 0) { frame = (frame + 1) & 3; if (frame === 4) frame = 0; }
 
-    // --- Player physics (Phase 8) ---
-    if (flag && !player.gameOver) {
+    // --- Player physics (Phase 8) — every other frame (halfLife) ---
+    if (flag && !player.gameOver && halfLife) {
       engineMovePlayer(keyboard, curScreenBuff, player, prefs, map);
     }
 
