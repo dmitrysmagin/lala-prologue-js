@@ -120,10 +120,15 @@ async function main() {
   let scrollCamera: Camera = { x: 0, y: 0 };
   let worldHotSpots = data.hotSpots; // default: per-screen (flip engine)
   let backdrop: { width: number; height: number; data: Uint8Array } | null = null;
+  let initialFlatEnemies: { x: number; y: number; x1: number; y1: number; x2: number; y2: number }[] = [];
   if (config.scrollEnabled) {
     world = buildWorldBuff(data.map, data.tileProperties, data.prefs);
     convertEnemiesToWorld(data.enems, data.prefs);
     worldHotSpots = convertHotSpotsToWorld(data.hotSpots, data.prefs);
+    // Save initial world-absolute enemy positions for restart
+    initialFlatEnemies = data.enems.flat().map(e => ({
+      x: e.x, y: e.y, x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2,
+    }));
     // Position camera on starting screen
     const sx = data.prefs.iniPant % data.prefs.mapW;
     const sy = Math.floor(data.prefs.iniPant / data.prefs.mapW);
@@ -146,7 +151,25 @@ async function main() {
     player.objects = 0;
     player.gameOver = 0;
     for (const hs of data.hotSpots) hs.s = true;
-    if (config.scrollEnabled) worldHotSpots = convertHotSpotsToWorld(data.hotSpots, data.prefs);
+    if (config.scrollEnabled) {
+      // Recalculate player starting position in world-absolute coords
+      const sx = prefs.iniPant % prefs.mapW;
+      const sy = Math.floor(prefs.iniPant / prefs.mapW);
+      player.x = (sx * prefs.screenW + prefs.iniTX) * 16 * 64;
+      player.y = (sy * prefs.screenH + prefs.iniTY) * 16 * 64;
+      worldHotSpots = convertHotSpotsToWorld(data.hotSpots, data.prefs);
+      // Restore initial enemy positions
+      const flat = data.enems.flat();
+      for (let i = 0; i < flat.length && i < initialFlatEnemies.length; i++) {
+        const init = initialFlatEnemies[i];
+        flat[i].x = init.x; flat[i].y = init.y;
+        flat[i].x1 = init.x1; flat[i].y1 = init.y1;
+        flat[i].x2 = init.x2; flat[i].y2 = init.y2;
+      }
+      // Reset camera to starting screen
+      scrollCamera.x = sx * data.prefs.screenW * 16;
+      scrollCamera.y = sy * data.prefs.screenH * 16;
+    }
 
     await screen.fadeIn(data.tilesetSheet.palette!, 10);
     try {

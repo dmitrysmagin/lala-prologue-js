@@ -65,7 +65,16 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
   if (prefs.bgL2) playSfx(prefs.bgL2, true);
 
   // Backdrop: draw to LAYER_3, copy to LAYER_2 as background base
-  const backdrop = opts.backdrop;
+  let backdrop = opts.backdrop;
+  if (!backdrop) {
+    try {
+      const r = await fetch(`/GFX/${prefs.backdropFile}`);
+      if (r.ok) {
+        const { PCXLoader } = await import("../assets/PCXLoader");
+        backdrop = new PCXLoader().load(new Uint8Array(await r.arrayBuffer()));
+      }
+    } catch { /* no backdrop */ }
+  }
   screen.clearLayer(LAYER_3);
   if (backdrop) {
     const dstIdx = screen.getLayerIndices(LAYER_3);
@@ -228,6 +237,7 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
 
     // --- Game Over display ---
     if (player.gameOver === -1) {
+      screen.filterBox(LAYER_1, 116, 92, 203, 107, 255, await getBma());
       engineRprint(screen, LAYER_1, "GAME OVER", 123, 95);
       screen.copyLayer(LAYER_1, VIDEO);
       screen.present();
@@ -243,4 +253,21 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
   if (prefs.bgL1) stopSfx(5);
   if (prefs.bgL2) stopSfx(6);
   return res ?? 0;
+}
+
+let _bmaCache: Uint8Array | null = null;
+async function getBma(): Promise<Uint8Array> {
+  if (_bmaCache) return _bmaCache;
+  try {
+    const r = await fetch("/GFX/LALA.BMA");
+    if (r.ok) {
+      const buf = new Uint8Array(await r.arrayBuffer());
+      if (buf.length >= 65536) { _bmaCache = buf; return buf; }
+    }
+  } catch { /* ignore */ }
+  // Fallback: mock darken matrix (512 bytes, all 0x80 = mid-darken)
+  const mock = new Uint8Array(65536);
+  mock.fill(0x80);
+  _bmaCache = mock;
+  return mock;
 }

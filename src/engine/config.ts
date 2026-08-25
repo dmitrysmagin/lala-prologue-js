@@ -7,5 +7,5 @@
  */
 export const config = {
   gameSpeed: 0.4,
-  scrollEnabled: false,
+  scrollEnabled: true,
 };
