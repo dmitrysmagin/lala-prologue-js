@@ -13,6 +13,12 @@ import { STATENORMAL, STATEFLICKER, DLEFT, DRIGHT, DUP, DDOWN, cToIdx } from "./
 import { engineDetectKeyHole } from "./collision";
 import type { TypePlayer, TypeTileLayers, TypePrefs } from "./types";
 
+/** Callback type for triggering sound effects — keeps player.ts decoupled from audio */
+export type PlaySfx = (slot: number, loop?: boolean, freq?: number) => void;
+/** Callback for stopping a specific voice */
+export type StopSfx = (voice: number) => void;
+const noopSfx: PlaySfx = () => {};
+
 /**
  * ENGINE.BAS:557 — SUB engineMovePlayer(curScreenBuff, player, prefs, map())
  * Processes one frame of player physics. Sets player.attempt if edge reached.
@@ -29,6 +35,7 @@ export function engineMovePlayer(
   player: TypePlayer,
   prefs: TypePrefs,
   map: Uint8Array,
+  playSfx: PlaySfx = noopSfx,
 ): void {
   // Reset attempt each frame
   player.attempt = 0;
@@ -97,7 +104,8 @@ export function engineMovePlayer(
       if (onGround) {
         player.jumping = -1;
         player.ctJump = 0;
-        // sfx: JUMP (slot 3) — stubbed, will be wired in Phase 12
+        // SFX: JUMP (slot 3) — slight pitch randomisation
+        playSfx(3, false, 11025 + ((Math.random() * 1024) | 0));
         player.x = x << 6; // snap to tile grid
       }
     }
@@ -194,7 +202,8 @@ export function engineMovePlayer(
     if (keyboard.isDown(SC_RIGHT)) opened = engineDetectKeyHole(curScreenBuff, map, xx + 1, yy);
     if (opened) {
       player.keys--;
-      // sfx: BOLT (slot 1) — stubbed
+      // SFX: BOLT (slot 1) — keyhole unlock
+      playSfx(1);
     }
   }
 
@@ -206,9 +215,11 @@ export function engineMovePlayer(
   const ev3 = (y & 15) !== 0 && curScreenBuff[cToIdx(xx, yy + 1)].behaviour === 1;
   const ev4 = (x & 15) !== 0 && (y & 15) !== 0 && curScreenBuff[cToIdx(xx + 1, yy + 1)].behaviour === 1;
   if (ev1 || ev2 || ev3 || ev4) {
-    // sfx: PINCHE (slot 7) — always plays
-    // sfx: AH (slot 8) — only when STATENORMAL
+    // SFX: PINCHE (slot 7) — always plays on evil tile
+    playSfx(7);
     if (player.state === STATENORMAL) {
+      // SFX: AH (slot 8) — pain vocal only when not already flickering
+      playSfx(8, false, 11025 + ((Math.random() * 1024) | 0));
       player.lives--;
       player.state = STATEFLICKER;
       player.ctState = 128;

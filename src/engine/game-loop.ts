@@ -5,9 +5,11 @@ import type { TypePrefs, TypePlayer, TypeTileLayers, TypeHotSpots, TypeEnems } f
 import { createCurScreenBuff } from "./types";
 import { engineScreenPrepare } from "./map";
 import { engineScreenDrawLayer1, engineScreenDrawLayer2, engineDrawHotSpots, enginePrintStats, engineRprint } from "./render";
-import { engineMovePlayer } from "./player";
+import { engineMovePlayer, type PlaySfx, type StopSfx } from "./player";
 import { engineMoveEnems } from "./enemies";
 import { PCXLoader } from "../assets/PCXLoader";
+
+export type { PlaySfx, StopSfx } from "./player";
 
 /**
  * Result codes mirroring QB engineDoGame% return:
@@ -34,6 +36,10 @@ export interface EngineDoGameOpts {
   flag: 0 | 1;
   /** Optional backdrop PCX (320×200/192). If not provided, loads from /GFX/BACKDROP.PCX */
   backdrop?: { width: number; height: number; data: Uint8Array } | null;
+  /** Optional SFX callback — wired from SoundEffects in main.ts */
+  playSfx?: PlaySfx;
+  /** Optional SFX stop callback — for stopping ambient loops on exit */
+  stopSfx?: StopSfx;
   /** Frame budget: RAF, but expose for tests */
   onFrame?: (state: { nPant: number; frame: number; player: TypePlayer }) => void;
 }
@@ -81,6 +87,8 @@ function blitBackdropToLayer(screen: Screen, layer: number, backdrop: { width: n
 export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGameResult> {
   const { screen, keyboard, prefs, tileProperties, spriteProperties, spriteMapping, tileset, spriteset, enems, hotSpots, player } = opts;
   const flag = opts.flag;
+  const playSfx: PlaySfx = opts.playSfx ?? (() => {});
+  const stopSfx: StopSfx = opts.stopSfx ?? (() => {});
   const curScreenBuff = opts.curScreenBuff ?? createCurScreenBuff();
 
   const hotSpotsTiles: number[] = [];
@@ -127,6 +135,12 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
   let res: EngineDoGameResult | null = null;
   let running = true;
 
+  // Start ambient loops (QB: DQBplaySound prefs.bgL1,5,11025,LOOPED / bgL2,6,11025,LOOPED)
+  if (flag) {
+    if (prefs.bgL1) playSfx(prefs.bgL1, true);
+    if (prefs.bgL2) playSfx(prefs.bgL2, true);
+  }
+
   // DQBwait simulation: RAF throttles to 60fps
   const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
@@ -142,12 +156,12 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
 
     // --- Player physics (Phase 8) — every 4th frame ---
     if (flag && !player.gameOver && halfLife === 0) {
-      engineMovePlayer(keyboard, curScreenBuff, player, prefs, map);
+      engineMovePlayer(keyboard, curScreenBuff, player, prefs, map, playSfx);
     }
 
     // --- Enemy AI + platform riding + collision (Phase 9) ---
     if (flag && halfLife === 0) {
-      engineMoveEnems(enems, curScreenBuff, prefs, player, nPant);
+      engineMoveEnems(enems, curScreenBuff, prefs, player, nPant, playSfx);
     }
 
     // --- Screen transition ---
@@ -172,7 +186,7 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
       player.attempt = 0;
     }
 
-    // --- Hotspot collection (Phase 10 logic, minimal for Phase 7) ---
+    // --- Hotspot collection (Phase 10) + SFX (Phase 12) ---
     if (flag && map) {
       const x = player.x >> 6;
       const y = player.y >> 6;
@@ -180,9 +194,9 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
         const hs = hotSpots[nPant];
         if (hs && hs.s) {
           hs.s = false;
-          if (hs.t === 1) player.objects++;
-          else if (hs.t === 2) player.keys++;
-          else if (hs.t === 3) player.lives += prefs.refill;
+          if (hs.t === 1) { player.objects++; playSfx(6); }       // OBJECT (slot 6)
+          else if (hs.t === 2) { player.keys++; playSfx(4); }    // KEY (slot 4)
+          else if (hs.t === 3) { player.lives += prefs.refill; playSfx(5); } // LIFE (slot 5)
           prefs.hotSpotX = 999; prefs.hotSpotY = 999;
         }
       }
@@ -294,7 +308,11 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
     // Title mode blinking done via render; no extra wait
   }
 
-  // Cleanup per QB: PLAY STOP / BeSilent / DQBstopVoice 5,6 — music handled by caller
+  // Cleanup: stop ambient loops (voices 5 and 6)
+  if (flag) {
+    if (prefs.bgL1) stopSfx(5);
+    if (prefs.bgL2) stopSfx(6);
+  }
   return res ?? 0;
 }
 

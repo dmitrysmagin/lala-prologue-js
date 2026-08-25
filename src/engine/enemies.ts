@@ -6,6 +6,9 @@ import { STATEFLICKER } from "./types";
 import type { TypeEnems, TypePlayer, TypePrefs, TypeTileLayers } from "./types";
 import { cToIdx } from "./types";
 import { engineDetectCollision } from "./collision";
+import type { PlaySfx } from "./player";
+
+const noopSfx: PlaySfx = () => {};
 
 /**
  * ENGINE.BAS:455 — move all enemies on screen nPant, handle platform riding
@@ -19,6 +22,7 @@ export function engineMoveEnems(
   prefs: TypePrefs,
   player: TypePlayer,
   nPant: number,
+  playSfx: PlaySfx = noopSfx,
 ): void {
   player.gotten = 0;
 
@@ -104,7 +108,9 @@ export function engineMoveEnems(
         if (e.my > 0) player.vy = prefs.walkVxMax << 1;
         else player.vy = -(prefs.walkVxMax << 1);
         player.lives -= 1;
-        // SFX: HIT (slot 2) + AH (slot 8) — stubbed
+        // SFX: HIT (slot 2) + AH (slot 8)
+        playSfx(2);
+        playSfx(8, false, 11025 + ((Math.random() * 1024) | 0));
       }
     }
 

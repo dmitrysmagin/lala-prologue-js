@@ -3,6 +3,7 @@ import { Keyboard } from "./keyboard";
 import { showTitle } from "./states/title";
 import { showEnding } from "./states/ending";
 import { MusicPlayer } from "./audio/music-player";
+import { SoundEffects } from "./audio/sound-effects";
 import { createDefaultPrefs, createPlayer } from "./engine/prefs";
 import { createCurScreenBuff } from "./engine/types";
 import {
@@ -22,6 +23,7 @@ const canvas = document.getElementById("gameCanvas") as HTMLCanvasElement;
 const screen = new Screen(canvas);
 const keyboard = new Keyboard(window);
 const music = new MusicPlayer();
+const sfx = new SoundEffects();
 
 const hud = document.createElement("div");
 hud.style.cssText =
@@ -69,6 +71,8 @@ async function main() {
       banner.addEventListener("click", () => {
         // Create AudioContext INSIDE the gesture handler — Chrome requires this.
         music.init().catch(() => {});
+        sfx.ensureContext();
+        sfx.loadAll().catch(() => {});
         banner.remove();
         resolve();
       }, { once: true });
@@ -144,6 +148,8 @@ async function main() {
       player,
       curScreenBuff,
       flag: 1,
+      playSfx: (slot, loop = false, freq = 11025) => sfx.play(slot, loop, freq),
+      stopSfx: (voice) => sfx.stopVoice(voice),
       onFrame: ({ nPant, frame }) => {
         if (frame % 60 === 0) {
           hud.textContent =
