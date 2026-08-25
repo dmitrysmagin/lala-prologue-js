@@ -18,6 +18,8 @@ import {
 } from "./engine/map";
 import { engineDoGame } from "./engine/game-loop";
 import { loadGameFont } from "./assets/fnt-cache";
+import { config } from "./engine/config";
+import { buildWorldBuff, convertEnemiesToWorld, type WorldBuff, type Camera } from "./engine/scroll-types";
 
 const canvas = document.getElementById("gameCanvas") as HTMLCanvasElement;
 const screen = new Screen(canvas);
@@ -111,6 +113,19 @@ async function main() {
   const player = createPlayer(data.prefs);
   const curScreenBuff = createCurScreenBuff();
 
+  // Build world buffer for scroll engine (built once, reused)
+  let world: WorldBuff | null = null;
+  let scrollCamera: Camera = { x: 0, y: 0 };
+  if (config.scrollEnabled) {
+    world = buildWorldBuff(data.map, data.tileProperties, data.prefs);
+    convertEnemiesToWorld(data.enems, data.prefs);
+    // Position camera on starting screen
+    const sx = data.prefs.iniPant % data.prefs.mapW;
+    const sy = Math.floor(data.prefs.iniPant / data.prefs.mapW);
+    scrollCamera.x = sx * data.prefs.screenW * 16;
+    scrollCamera.y = sy * data.prefs.screenH * 16;
+  }
+
   // Outer loop: Title → Play → Title
   while (true) {
     const prefs = data.prefs;
@@ -133,31 +148,41 @@ async function main() {
     const tileset = { width: data.tilesetSheet.width, height: data.tilesetSheet.height, data: data.tilesetSheet.data, palette: data.tilesetSheet.palette };
     const spriteset = { width: data.spritesetSheet.width, height: data.spritesetSheet.height, data: data.spritesetSheet.data, palette: data.spritesetSheet.palette };
 
-    const res = await engineDoGame({
-      screen,
-      keyboard,
-      prefs,
-      tileProperties: data.tileProperties,
-      spriteProperties: data.spriteProperties,
-      spriteMapping: data.spriteMapping,
-      tileset,
-      spriteset,
-      map: data.map,
-      enems: data.enems,
-      hotSpots: data.hotSpots,
-      player,
-      curScreenBuff,
-      flag: 1,
-      playSfx: (slot, loop = false, freq = 11025) => sfx.play(slot, loop, freq),
-      stopSfx: (voice) => sfx.stopVoice(voice),
-      onFrame: ({ nPant, frame }) => {
-        if (frame % 60 === 0) {
-          hud.textContent =
-            `Game — pant ${nPant} (${nPant % prefs.mapW},${Math.floor(nPant / prefs.mapW)}) frame ${frame & 3} ` +
-            `| obj ${player.objects}/${prefs.maxObjs} keys ${player.keys} lives ${player.lives}`;
-        }
-      },
-    });
+    // Engine selection: scroll or flip-screen
+    let res: number;
+    if (config.scrollEnabled && world) {
+      // TODO: scrollDoGame — for now falls through to flip-screen
+      res = await engineDoGame({
+        screen, keyboard, prefs, tileProperties: data.tileProperties,
+        spriteProperties: data.spriteProperties, spriteMapping: data.spriteMapping,
+        tileset, spriteset, map: data.map, enems: data.enems, hotSpots: data.hotSpots,
+        player, curScreenBuff, flag: 1,
+        playSfx: (slot, loop = false, freq = 11025) => sfx.play(slot, loop, freq),
+        stopSfx: (voice) => sfx.stopVoice(voice),
+        onFrame: ({ frame }) => {
+          if (frame % 60 === 0) {
+            hud.textContent =
+              `[scroll] obj ${player.objects}/${prefs.maxObjs} keys ${player.keys} lives ${player.lives}`;
+          }
+        },
+      });
+    } else {
+      res = await engineDoGame({
+        screen, keyboard, prefs, tileProperties: data.tileProperties,
+        spriteProperties: data.spriteProperties, spriteMapping: data.spriteMapping,
+        tileset, spriteset, map: data.map, enems: data.enems, hotSpots: data.hotSpots,
+        player, curScreenBuff, flag: 1,
+        playSfx: (slot, loop = false, freq = 11025) => sfx.play(slot, loop, freq),
+        stopSfx: (voice) => sfx.stopVoice(voice),
+        onFrame: ({ nPant, frame }) => {
+          if (frame % 60 === 0) {
+            hud.textContent =
+              `Game — pant ${nPant} (${nPant % prefs.mapW},${Math.floor(nPant / prefs.mapW)}) frame ${frame & 3} ` +
+              `| obj ${player.objects}/${prefs.maxObjs} keys ${player.keys} lives ${player.lives}`;
+          }
+        },
+      });
+    }
 
     console.log(`[main] engineDoGame returned ${res}`);
     await music.fadeOut(300).catch(() => {});
