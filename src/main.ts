@@ -17,6 +17,7 @@ import {
   engineLoadHotSpots,
 } from "./engine/map";
 import { engineDoGame } from "./engine/game-loop";
+import { scrollDoGame } from "./engine/scroll-game-loop";
 import { loadGameFont } from "./assets/fnt-cache";
 import { config } from "./engine/config";
 import { buildWorldBuff, convertEnemiesToWorld, type WorldBuff, type Camera } from "./engine/scroll-types";
@@ -151,12 +152,16 @@ async function main() {
     // Engine selection: scroll or flip-screen
     let res: number;
     if (config.scrollEnabled && world) {
-      // TODO: scrollDoGame — for now falls through to flip-screen
-      res = await engineDoGame({
-        screen, keyboard, prefs, tileProperties: data.tileProperties,
+      // Flatten enemies from per-screen array to world-absolute flat array
+      const flatEnemies = data.enems.flat();
+      res = await scrollDoGame({
+        screen, keyboard, prefs,
         spriteProperties: data.spriteProperties, spriteMapping: data.spriteMapping,
-        tileset, spriteset, map: data.map, enems: data.enems, hotSpots: data.hotSpots,
-        player, curScreenBuff, flag: 1,
+        tileset, spriteset,
+        world, camera: scrollCamera,
+        enemies: flatEnemies,
+        hotSpots: data.hotSpots,
+        player,
         playSfx: (slot, loop = false, freq = 11025) => sfx.play(slot, loop, freq),
         stopSfx: (voice) => sfx.stopVoice(voice),
         onFrame: ({ frame }) => {
