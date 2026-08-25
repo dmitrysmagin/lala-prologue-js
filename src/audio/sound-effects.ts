@@ -34,20 +34,21 @@ export interface SfxEntry {
   voice: number;
   freq: number;
   loop: boolean;
+  volume: number; // 0.0–1.0, default 0.75
   notes: string;
 }
 
 export const SFX_CATALOG: SfxEntry[] = [
-  { slot: 1, file: "SFX/BOLT.WAV", event: "Keyhole unlock", voice: 2, freq: 11025, loop: false, notes: "Metallic bolt click" },
-  { slot: 2, file: "SFX/HIT.WAV", event: "Enemy collision", voice: 4, freq: 11025, loop: false, notes: "Short thud" },
-  { slot: 3, file: "SFX/JUMP.WAV", event: "Player jump", voice: 1, freq: 11025, loop: false, notes: "Pop/jump with pitch randomisation" },
-  { slot: 4, file: "SFX/KEY.WAV", event: "Key pickup", voice: 4, freq: 11025, loop: false, notes: "Chime" },
-  { slot: 5, file: "SFX/LIFE.WAV", event: "Extra life", voice: 4, freq: 11025, loop: false, notes: "Upbeat jingle" },
-  { slot: 6, file: "SFX/OBJECT.WAV", event: "Object pickup", voice: 4, freq: 11025, loop: false, notes: "Collect shimmer" },
-  { slot: 7, file: "SFX/PINCHE.WAV", event: "Evil tile damage", voice: 4, freq: 11025, loop: false, notes: "Sharp pinche" },
-  { slot: 8, file: "SFX/AH.WAV", event: "Pain vocal", voice: 3, freq: 11025, loop: false, notes: "Vocal ah" },
-  { slot: 9, file: "SFX/AMBIENT1.WAV", event: "Ambient loop L1", voice: 5, freq: 11025, loop: true, notes: "Cave/wind drone" },
-  { slot: 10, file: "SFX/AMBIENT2.WAV", event: "Ambient loop L2", voice: 6, freq: 11025, loop: true, notes: "Texture loop" },
+  { slot: 1,  file: "SFX/BOLT.WAV",     event: "Keyhole unlock",    voice: 2, freq: 11025, loop: false, volume: 0.75, notes: "Metallic bolt click" },
+  { slot: 2,  file: "SFX/HIT.WAV",      event: "Enemy collision",   voice: 4, freq: 11025, loop: false, volume: 0.75, notes: "Short thud" },
+  { slot: 3,  file: "SFX/JUMP.WAV",     event: "Player jump",       voice: 1, freq: 11025, loop: false, volume: 0.75, notes: "Pop/jump with pitch randomisation" },
+  { slot: 4,  file: "SFX/KEY.WAV",      event: "Key pickup",        voice: 4, freq: 11025, loop: false, volume: 0.75, notes: "Chime" },
+  { slot: 5,  file: "SFX/LIFE.WAV",     event: "Extra life",        voice: 4, freq: 11025, loop: false, volume: 0.75, notes: "Upbeat jingle" },
+  { slot: 6,  file: "SFX/OBJECT.WAV",   event: "Object pickup",     voice: 4, freq: 11025, loop: false, volume: 0.75, notes: "Collect shimmer" },
+  { slot: 7,  file: "SFX/PINCHE.WAV",   event: "Evil tile damage",  voice: 4, freq: 11025, loop: false, volume: 0.75, notes: "Sharp pinche" },
+  { slot: 8,  file: "SFX/AH.WAV",       event: "Pain vocal",        voice: 3, freq: 11025, loop: false, volume: 0.75, notes: "Vocal ah" },
+  { slot: 9,  file: "SFX/AMBIENT1.WAV", event: "Ambient loop L1",   voice: 5, freq: 11025, loop: true,  volume: 0.05, notes: "Cave/wind drone" },
+  { slot: 10, file: "SFX/AMBIENT2.WAV", event: "Ambient loop L2",   voice: 6, freq: 11025, loop: true,  volume: 0.05, notes: "Texture loop" },
 ];
 
 const CATALOG_BY_SLOT = new Map<number, SfxEntry>(SFX_CATALOG.map(e => [e.slot, e]));
@@ -55,6 +56,8 @@ const CATALOG_BY_SLOT = new Map<number, SfxEntry>(SFX_CATALOG.map(e => [e.slot, 
 export class SoundEffects {
   private ctx: AudioContext | null = null;
   private buffers = new Map<number, AudioBuffer>();
+  /** Per-voice GainNode for independent volume control */
+  private voiceGains = new Map<number, GainNode>();
   /** Track active sources per voice (1-6) for stopVoice */
   private activeByVoice = new Map<number, AudioBufferSourceNode>();
   private ready = false;
@@ -107,29 +110,38 @@ export class SoundEffects {
     const buf = this.buffers.get(slot);
     if (!buf) return;
     const entry = CATALOG_BY_SLOT.get(slot);
+    const voice = entry?.voice ?? 1;
+    const volume = entry?.volume ?? 0.75;
 
     // Resume if suspended (autoplay policy)
     if (this.ctx.state === "suspended") this.ctx.resume().catch(() => {});
 
     // Stop existing source on same voice
-    if (entry) this.stopVoice(entry.voice);
+    this.stopVoice(voice);
+
+    // Get or create per-voice GainNode
+    let gain = this.voiceGains.get(voice);
+    if (!gain) {
+      gain = this.ctx.createGain();
+      gain.connect(this.ctx.destination);
+      this.voiceGains.set(voice, gain);
+    }
+    gain.gain.value = volume;
 
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
     src.loop = loop;
     src.playbackRate.value = freq / 11025;
-    src.connect(this.ctx.destination);
+    src.connect(gain);
     src.start();
 
     // Track for stopVoice
-    if (entry) {
-      this.activeByVoice.set(entry.voice, src);
-      src.onended = () => {
-        if (this.activeByVoice.get(entry.voice) === src) {
-          this.activeByVoice.delete(entry.voice);
-        }
-      };
-    }
+    this.activeByVoice.set(voice, src);
+    src.onended = () => {
+      if (this.activeByVoice.get(voice) === src) {
+        this.activeByVoice.delete(voice);
+      }
+    };
   }
 
   /** Play by SFX_SLOT key name */
