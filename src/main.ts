@@ -172,6 +172,7 @@ async function main() {
         enemies: flatEnemies,
         hotSpots: worldHotSpots,
         player,
+        map: data.map,
         backdrop,
         playSfx: (slot, loop = false, freq = 11025) => sfx.play(slot, loop, freq),
         stopSfx: (voice) => sfx.stopVoice(voice),

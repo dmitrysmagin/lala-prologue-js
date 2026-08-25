@@ -31,6 +31,7 @@ export interface ScrollDoGameOpts {
   enemies: TypeEnems[];
   hotSpots: TypeHotSpots[];
   player: TypePlayer;
+  map: Uint8Array;
   backdrop?: { width: number; height: number; data: Uint8Array } | null;
   playSfx?: PlaySfx;
   stopSfx?: StopSfx;
@@ -42,7 +43,7 @@ import type { TypeEnems } from "./types";
 export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGameResult> {
   const {
     screen, keyboard, prefs, spriteProperties, spriteMapping,
-    tileset, spriteset, world, camera, player,
+    tileset, spriteset, world, camera, player, map,
   } = opts;
   const playSfx: PlaySfx = opts.playSfx ?? (() => {});
   const stopSfx: StopSfx = opts.stopSfx ?? (() => {});
@@ -105,7 +106,7 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
     if (tickNow) logicAccum -= 1.0;
 
     if (tickNow) {
-      scrollMovePlayer(keyboard, world, player, prefs, playSfx);
+      scrollMovePlayer(keyboard, world, player, prefs, map, playSfx);
       scrollMoveEnemies(enemies, world, prefs, player, playSfx);
 
       // Animation frame cycling

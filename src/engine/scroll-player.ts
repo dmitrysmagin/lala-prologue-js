@@ -17,6 +17,18 @@ function worldBehav(world: WorldBuff, tx: number, ty: number): number {
   return world.behaviour[ty * world.worldW + tx];
 }
 
+/** Clear a keyhole tile in world buffer + flat map */
+function worldClearKeyHole(world: WorldBuff, map: Uint8Array, tx: number, ty: number): boolean {
+  if (tx < 0 || tx >= world.worldW || ty < 0 || ty >= world.worldH) return false;
+  const wIdx = ty * world.worldW + tx;
+  if (world.behaviour[wIdx] !== 10) return false;
+  world.layer1[wIdx] = 0;
+  world.layer2[wIdx] = 0;
+  world.behaviour[wIdx] = 0;
+  map[world.realMapIndex[wIdx]] = 0;
+  return true;
+}
+
 /**
  * Scroll-mode player physics — same mechanics as engineMovePlayer but:
  * - Edge detection: clamp to world bounds (no attempt/DLEFT/etc)
@@ -28,6 +40,7 @@ export function scrollMovePlayer(
   world: WorldBuff,
   player: TypePlayer,
   prefs: TypePrefs,
+  map: Uint8Array,
   playSfx: PlaySfx = noopSfx,
 ): void {
   // No attempt — scroll engine has no screen transitions
@@ -169,6 +182,19 @@ export function scrollMovePlayer(
   xx = x >> 4;
   y = player.y >> 6;
   yy = y >> 4;
+
+  // ==========================
+  // KEYHOLE UNLOCKING
+  // ==========================
+  if ((y & 15) === 0 && (x & 15) === 0 && player.keys > 0) {
+    let opened = false;
+    if (keyboard.isDown(SC_LEFT)) opened = worldClearKeyHole(world, map, xx - 1, yy);
+    if (!opened && keyboard.isDown(SC_RIGHT)) opened = worldClearKeyHole(world, map, xx + 1, yy);
+    if (opened) {
+      player.keys--;
+      playSfx(1);
+    }
+  }
 
   // ==========================
   // EVIL TILES (behaviour == 1)
