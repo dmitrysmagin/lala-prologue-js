@@ -16,11 +16,12 @@ export function scrollDrawLayer1(
   cam: Camera,
   tileset: { width: number; height: number; data: Uint8Array },
   targetLayer: number,
+  screenPos: { x: number; y: number } = { x: 0, y: 0 },
 ): void {
   const startTX = cam.x >> 4;
   const startTY = cam.y >> 4;
-  const offX = -(cam.x & 15);
-  const offY = -(cam.y & 15);
+  const offX = -(cam.x & 15) + screenPos.x;
+  const offY = -(cam.y & 15) + screenPos.y;
 
   for (let row = 0; row <= 13; row++) {
     for (let col = 0; col <= 20; col++) {
@@ -45,11 +46,12 @@ export function scrollDrawLayer2(
   tileset: { width: number; height: number; data: Uint8Array },
   frame: number,
   targetLayer: number,
+  screenPos: { x: number; y: number } = { x: 0, y: 0 },
 ): void {
   const startTX = cam.x >> 4;
   const startTY = cam.y >> 4;
-  const offX = -(cam.x & 15);
-  const offY = -(cam.y & 15);
+  const offX = -(cam.x & 15) + screenPos.x;
+  const offY = -(cam.y & 15) + screenPos.y;
 
   for (let row = 0; row <= 13; row++) {
     for (let col = 0; col <= 20; col++) {
@@ -77,9 +79,10 @@ export function scrollDrawSprite(
   worldY: number,
   cam: Camera,
   spriteProps?: { offX: number; offY: number }[],
+  screenPos: { x: number; y: number } = { x: 0, y: 0 },
 ): void {
-  const sx = worldX - cam.x;
-  const sy = worldY - cam.y;
+  const sx = worldX - cam.x + screenPos.x;
+  const sy = worldY - cam.y + screenPos.y;
   // Quick bounds check — skip if off-screen
   if (sx < -24 || sx > 320 || sy < -24 || sy > 200) return;
   const off = spriteProps?.[spriteId] ?? { offX: 0, offY: 0 };

@@ -161,8 +161,9 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
 
     // --- Render ---
     // Restore backdrop from LAYER_3, then draw tiles on top
+    const sp = prefs.screenPos;
     screen.copyLayer(LAYER_3, LAYER_2);
-    scrollDrawLayer1(screen, world, camera, tileset, LAYER_2);
+    scrollDrawLayer1(screen, world, camera, tileset, LAYER_2, sp);
 
     // Composite: LAYER_2 → LAYER_1
     screen.copyLayer(LAYER_2, LAYER_1);
@@ -175,8 +176,8 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
       else if (hs.t === 2) nTile = prefs.keyTile;
       else if (hs.t === 3) nTile = prefs.lifeTile;
       if (!nTile) continue;
-      const hx = hs.x * 16 - camera.x;
-      const hy = hs.y * 16 - camera.y;
+      const hx = hs.x * 16 - camera.x + sp.x;
+      const hy = hs.y * 16 - camera.y + sp.y;
       if (hx > -16 && hx < 320 && hy > -16 && hy < 200) {
         screen.blitTile(LAYER_1, tileset, nTile, hx, hy);
       }
@@ -186,8 +187,8 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
     if (!player.gameOver) {
       const showPlayer = player.state === 0 || logicAccum < 0.5;
       if (showPlayer) {
-        const px = (player.x >> 6) - camera.x;
-        const py = (player.y >> 6) - camera.y;
+        const px = (player.x >> 6) - camera.x + sp.x;
+        const py = (player.y >> 6) - camera.y + sp.y;
         const off = spriteProperties[player.sprId] ?? { offX: 0, offY: 0 };
         screen.blitSprite(LAYER_1, spriteset, player.sprId, px - off.offX, py - off.offY);
       }
@@ -196,15 +197,15 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
     // Enemy sprites
     for (const e of enemies) {
       if (e.t === 0) continue;
-      const sx = e.x - camera.x;
-      const sy = e.y - camera.y;
+      const sx = e.x - camera.x + sp.x;
+      const sy = e.y - camera.y + sp.y;
       if (sx < -24 || sx > 320 || sy < -24 || sy > 200) continue;
       const off = spriteProperties[e.sprId] ?? { offX: 0, offY: 0 };
       screen.blitSprite(LAYER_1, spriteset, e.sprId, sx - off.offX, sy - off.offY);
     }
 
     // Animated layer2 tiles
-    scrollDrawLayer2(screen, world, camera, tileset, frame, LAYER_1);
+    scrollDrawLayer2(screen, world, camera, tileset, frame, LAYER_1, sp);
 
     // HUD stats (fixed position)
     enginePrintStats(screen, player, prefs, tileset);
