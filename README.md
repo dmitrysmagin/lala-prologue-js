@@ -77,8 +77,6 @@ lala-js/
 │   └── states/
 │       ├── title.ts          # Title screen
 │       └── ending.ts         # Ending screen
-├── lala-qb/                  # Original QB source (reference, not used at runtime)
-├── dqb/                      # DirectQB library docs (reference)
 └── PORTING_PLAN.md           # Detailed porting plan
 ```
 
