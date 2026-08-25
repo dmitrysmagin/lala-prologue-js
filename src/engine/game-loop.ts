@@ -8,6 +8,7 @@ import { engineScreenDrawLayer1, engineScreenDrawLayer2, engineDrawHotSpots, eng
 import { engineMovePlayer, type PlaySfx, type StopSfx } from "./player";
 import { engineMoveEnems } from "./enemies";
 import { PCXLoader } from "../assets/PCXLoader";
+import { config } from "./config";
 
 export type { PlaySfx, StopSfx } from "./player";
 
@@ -122,7 +123,7 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
 
   let frame = 0;
   let subFrame = 0;
-  let halfLife = 0;
+  let logicAccum = 0;   // fractional accumulator — physics fires when >= 1.0
 
   // Ensure player position matches iniTX/TY if flag
   if (flag) {
@@ -147,20 +148,23 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
   while (running) {
     // --- Frame pacing ---
     await nextFrame();
-    halfLife = (halfLife + 1) & 3;
-    // Layer2 animation — half speed of game logic
-    if ((halfLife & 1) === 0) {
+    logicAccum += config.gameSpeed;
+    const tickNow = logicAccum >= 1.0;
+    if (tickNow) logicAccum -= 1.0; // consume one tick worth, keep remainder
+
+    // Layer2 animation — advances when physics ticks
+    if (tickNow) {
       subFrame = (subFrame + 1) & 3;
       if (subFrame === 0) { frame = (frame + 1) & 3; if (frame === 4) frame = 0; }
     }
 
-    // --- Player physics (Phase 8) — every 4th frame ---
-    if (flag && !player.gameOver && halfLife === 0) {
+    // --- Player physics (Phase 8) — every physics tick ---
+    if (flag && !player.gameOver && tickNow) {
       engineMovePlayer(keyboard, curScreenBuff, player, prefs, map, playSfx);
     }
 
     // --- Enemy AI + platform riding + collision (Phase 9) ---
-    if (flag && halfLife === 0) {
+    if (flag && tickNow) {
       engineMoveEnems(enems, curScreenBuff, prefs, player, nPant, playSfx);
     }
 
@@ -203,7 +207,7 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
     }
 
     // --- Animation frames (ENGINE.BAS:35-53) — synced with game logic ---
-    if (flag && halfLife === 0 && player && spriteMapping.length > 0) {
+    if (flag && tickNow && player && spriteMapping.length > 0) {
       // Player frame calculation
       if (player.vy < 0) {
         // Jumping up
@@ -224,7 +228,7 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
       }
     }
     // Enemy frame calculation (ENGINE.BAS:20-33)
-    if (halfLife === 0) {
+    if (tickNow) {
       for (let i = 0; i < prefs.nEnems; i++) {
         const e = enems[nPant]?.[i];
         if (!e || e.t === 0) continue;
@@ -242,8 +246,8 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
     if (!player.gameOver) {
       const px = player.x >> 6;
       const py = player.y >> 6;
-      // Flicker state: blink at ~15Hz when STATEFLICKER
-      const showPlayer = player.state === 0 || (halfLife & 1) === 0;
+      // Flicker state: blink using accumulator fraction (~30 Hz at speed 1.0)
+      const showPlayer = player.state === 0 || logicAccum < 0.5;
       if (showPlayer) {
         const sid = player.sprId;
         const off = spriteProperties[sid] ?? { offX: 0, offY: 0 };
