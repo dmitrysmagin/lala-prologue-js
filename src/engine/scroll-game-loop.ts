@@ -159,12 +159,27 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
     }
 
     // --- Render ---
-    // Background: LAYER_2
-    screen.clearLayer(LAYER_2);
+    // Restore backdrop from LAYER_3, then draw tiles on top
+    screen.copyLayer(LAYER_3, LAYER_2);
     scrollDrawLayer1(screen, world, camera, tileset, LAYER_2);
 
     // Composite: LAYER_2 → LAYER_1
     screen.copyLayer(LAYER_2, LAYER_1);
+
+    // Hotspot tiles (object/key/life) — draw on LAYER_1 at world-absolute position
+    for (const hs of hotSpots) {
+      if (!hs.s || hs.t === 0) continue;
+      let nTile = 0;
+      if (hs.t === 1) nTile = prefs.objectTile;
+      else if (hs.t === 2) nTile = prefs.keyTile;
+      else if (hs.t === 3) nTile = prefs.lifeTile;
+      if (!nTile) continue;
+      const hx = hs.x * 16 - camera.x;
+      const hy = hs.y * 16 - camera.y;
+      if (hx > -16 && hx < 320 && hy > -16 && hy < 200) {
+        screen.blitTile(LAYER_1, tileset, nTile, hx, hy);
+      }
+    }
 
     // Player sprite
     if (!player.gameOver) {
