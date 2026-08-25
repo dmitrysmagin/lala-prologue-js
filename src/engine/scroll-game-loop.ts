@@ -2,7 +2,7 @@
  * Scroll-mode game loop — camera-based smooth scrolling.
  * Replaces engineDoGame when config.scrollEnabled is true.
  */
-import { Screen, LAYER_1, LAYER_2, VIDEO } from "../screen";
+import { Screen, LAYER_1, LAYER_2, LAYER_3, VIDEO } from "../screen";
 import { Keyboard, SC_W, SC_E, SC_R } from "../keyboard";
 import type { TypePrefs, TypePlayer, TypeSpriteProperties, TypeHotSpots } from "./types";
 import { config } from "./config";
@@ -11,7 +11,7 @@ import { updateCamera } from "./scroll-camera";
 import { scrollDrawLayer1, scrollDrawLayer2 } from "./scroll-render";
 import { scrollMovePlayer } from "./scroll-player";
 import { scrollMoveEnemies } from "./scroll-enemies";
-import { enginePrintStats } from "./render";
+import { enginePrintStats, engineRprint } from "./render";
 import type { PlaySfx, StopSfx } from "./player";
 
 export type { PlaySfx, StopSfx } from "./player";
@@ -31,6 +31,7 @@ export interface ScrollDoGameOpts {
   enemies: TypeEnems[];
   hotSpots: TypeHotSpots[];
   player: TypePlayer;
+  backdrop?: { width: number; height: number; data: Uint8Array } | null;
   playSfx?: PlaySfx;
   stopSfx?: StopSfx;
   onFrame?: (state: { frame: number; player: TypePlayer }) => void;
@@ -61,6 +62,31 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
   // Start ambient loops
   if (prefs.bgL1) playSfx(prefs.bgL1, true);
   if (prefs.bgL2) playSfx(prefs.bgL2, true);
+
+  // Backdrop: draw to LAYER_3, copy to LAYER_2 as background base
+  const backdrop = opts.backdrop;
+  screen.clearLayer(LAYER_3);
+  if (backdrop) {
+    const dstIdx = screen.getLayerIndices(LAYER_3);
+    const dstU32 = screen.getLayerU32(LAYER_3);
+    const curLut = screen.getPaletteLut();
+    const bw = backdrop.width, bh = backdrop.height;
+    const by = prefs.screenPos?.y ?? 0;
+    for (let y = 0; y < bh; y++) {
+      const py = by + y;
+      if (py < 0 || py >= 200) continue;
+      const dRow = py * 320;
+      const sRow = y * bw;
+      for (let x = 0; x < bw && x < 320; x++) {
+        const pal = backdrop.data[sRow + x];
+        if (pal === 0) continue;
+        const di = dRow + x;
+        dstIdx[di] = pal;
+        dstU32[di] = curLut[pal];
+      }
+    }
+  }
+  screen.copyLayer(LAYER_3, LAYER_2);
 
   // Initialize camera on player
   updateCamera(camera, player, worldPxW, worldPxH);
@@ -182,6 +208,15 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
     // --- Win/Loss ---
     if (player.objects >= prefs.maxObjs) { res = -1; running = false; }
     else if (player.lives < 0) { res = -2; player.gameOver = -1; }
+
+    // --- Game Over display ---
+    if (player.gameOver === -1) {
+      engineRprint(screen, LAYER_1, "GAME OVER", 123, 95);
+      screen.copyLayer(LAYER_1, VIDEO);
+      screen.present();
+      await new Promise<void>((r) => setTimeout(r, 2000));
+      running = false;
+    }
 
     // --- Exit via Escape ---
     if (keyboard.isDown(0x01)) { res = 0; running = false; }

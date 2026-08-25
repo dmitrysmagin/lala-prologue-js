@@ -6,6 +6,7 @@ import { MusicPlayer } from "./audio/music-player";
 import { SoundEffects } from "./audio/sound-effects";
 import { createDefaultPrefs, createPlayer } from "./engine/prefs";
 import { createCurScreenBuff } from "./engine/types";
+import { PCXLoader } from "./assets/PCXLoader";
 import {
   engineLoadTileProperties,
   engineLoadSpriteProperties,
@@ -20,7 +21,7 @@ import { engineDoGame } from "./engine/game-loop";
 import { scrollDoGame } from "./engine/scroll-game-loop";
 import { loadGameFont } from "./assets/fnt-cache";
 import { config } from "./engine/config";
-import { buildWorldBuff, convertEnemiesToWorld, type WorldBuff, type Camera } from "./engine/scroll-types";
+import { buildWorldBuff, convertEnemiesToWorld, convertHotSpotsToWorld, type WorldBuff, type Camera } from "./engine/scroll-types";
 
 const canvas = document.getElementById("gameCanvas") as HTMLCanvasElement;
 const screen = new Screen(canvas);
@@ -117,14 +118,22 @@ async function main() {
   // Build world buffer for scroll engine (built once, reused)
   let world: WorldBuff | null = null;
   let scrollCamera: Camera = { x: 0, y: 0 };
+  let worldHotSpots = data.hotSpots; // default: per-screen (flip engine)
+  let backdrop: { width: number; height: number; data: Uint8Array } | null = null;
   if (config.scrollEnabled) {
     world = buildWorldBuff(data.map, data.tileProperties, data.prefs);
     convertEnemiesToWorld(data.enems, data.prefs);
+    worldHotSpots = convertHotSpotsToWorld(data.hotSpots, data.prefs);
     // Position camera on starting screen
     const sx = data.prefs.iniPant % data.prefs.mapW;
     const sy = Math.floor(data.prefs.iniPant / data.prefs.mapW);
     scrollCamera.x = sx * data.prefs.screenW * 16;
     scrollCamera.y = sy * data.prefs.screenH * 16;
+    // Load backdrop
+    try {
+      const r = await fetch(`/GFX/${data.prefs.backdropFile}`);
+      if (r.ok) backdrop = new PCXLoader().load(new Uint8Array(await r.arrayBuffer()));
+    } catch { /* no backdrop */ }
   }
 
   // Outer loop: Title → Play → Title
@@ -137,6 +146,7 @@ async function main() {
     player.objects = 0;
     player.gameOver = 0;
     for (const hs of data.hotSpots) hs.s = true;
+    if (config.scrollEnabled) worldHotSpots = convertHotSpotsToWorld(data.hotSpots, data.prefs);
 
     await screen.fadeIn(data.tilesetSheet.palette!, 10);
     try {
@@ -160,8 +170,9 @@ async function main() {
         tileset, spriteset,
         world, camera: scrollCamera,
         enemies: flatEnemies,
-        hotSpots: data.hotSpots,
+        hotSpots: worldHotSpots,
         player,
+        backdrop,
         playSfx: (slot, loop = false, freq = 11025) => sfx.play(slot, loop, freq),
         stopSfx: (voice) => sfx.stopVoice(voice),
         onFrame: ({ frame }) => {
