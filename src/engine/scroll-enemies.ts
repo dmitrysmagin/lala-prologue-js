@@ -117,19 +117,20 @@ export function scrollMoveEnemies(
       }
     } else {
       // --- Damage collision (AABB ±14 px) ---
-      if (player.state !== STATENORMAL) continue;
-      const px = player.x >> 6;
-      const py = player.y >> 6;
-      if (e.x >= px - 14 && e.x <= px + 14 && e.y >= py - 14 && e.y <= py + 14) {
-        player.state = STATEFLICKER;
-        player.ctState = 128;
-        if (e.mx > 0) player.vx = prefs.walkVxMax << 1;
-        else player.vx = -(prefs.walkVxMax << 1);
-        if (e.my > 0) player.vy = prefs.walkVxMax << 1;
-        else player.vy = -(prefs.walkVxMax << 1);
-        player.lives -= 1;
-        playSfx(2);
-        playSfx(8, false, 11025 + ((Math.random() * 1024) | 0));
+      if (player.state === STATENORMAL) {
+        const px = player.x >> 6;
+        const py = player.y >> 6;
+        if (e.x >= px - 14 && e.x <= px + 14 && e.y >= py - 14 && e.y <= py + 14) {
+          player.state = STATEFLICKER;
+          player.ctState = 128;
+          if (e.mx > 0) player.vx = prefs.walkVxMax << 1;
+          else player.vx = -(prefs.walkVxMax << 1);
+          if (e.my > 0) player.vy = prefs.walkVxMax << 1;
+          else player.vy = -(prefs.walkVxMax << 1);
+          player.lives -= 1;
+          playSfx(2);
+          playSfx(8, false, 11025 + ((Math.random() * 1024) | 0));
+        }
       }
     }
 
