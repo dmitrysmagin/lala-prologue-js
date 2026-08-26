@@ -12,6 +12,7 @@ import { scrollDrawLayer1, scrollDrawLayer2 } from "./scroll-render";
 import { scrollMovePlayer } from "./scroll-player";
 import { scrollMoveEnemies } from "./scroll-enemies";
 import { enginePrintStats, engineRprint } from "./render";
+import { PCXLoader } from "../assets/PCXLoader";
 import type { PlaySfx, StopSfx } from "./player";
 
 export type { PlaySfx, StopSfx } from "./player";
@@ -69,10 +70,7 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
   if (!backdrop) {
     try {
       const r = await fetch(`/GFX/${prefs.backdropFile}`);
-      if (r.ok) {
-        const { PCXLoader } = await import("../assets/PCXLoader");
-        backdrop = new PCXLoader().load(new Uint8Array(await r.arrayBuffer()));
-      }
+      if (r.ok) backdrop = new PCXLoader().load(new Uint8Array(await r.arrayBuffer()));
     } catch { /* no backdrop */ }
   }
   screen.clearLayer(LAYER_3);

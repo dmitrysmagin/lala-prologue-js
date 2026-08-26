@@ -17,6 +17,16 @@ function worldBehavAt(world: WorldBuff, px: number, py: number): number {
   return world.behaviour[ty * world.worldW + tx];
 }
 
+/** Check if a tile is solid for enemy movement (behaviour > 7 = wall) */
+function isWall(world: WorldBuff, px: number, py: number): boolean {
+  return worldBehavAt(world, px, py) > 7;
+}
+
+/** Check if a tile is solid for floor/ceiling (behaviour > 3) */
+function isSolid(world: WorldBuff, px: number, py: number): boolean {
+  return worldBehavAt(world, px, py) > 3;
+}
+
 /**
  * Move all world-absolute enemies, handle platform riding and damage.
  * @param enemies — flat array of all enemies (already world-converted)
@@ -31,12 +41,42 @@ export function scrollMoveEnemies(
 ): void {
   player.gotten = 0;
 
+  const worldPxW = world.worldW * 16;
+  const worldPxH = world.worldH * 16;
+  const plPx = player.x >> 6;
+  const plPy = player.y >> 6;
+
   for (const e of enemies) {
     if (e.t === 0) continue;
+
+    // --- Proximity culling: skip enemies far from player ---
+    const distX = e.x - plPx;
+    const distY = e.y - plPy;
+    if (distX > 400 || distX < -400 || distY > 400 || distY < -400) continue;
 
     // --- Move ---
     e.x += e.mx;
     e.y += e.my;
+
+    // --- Wall collision (non-platform enemies) ---
+    if (e.t !== prefs.enemPlat) {
+      // Horizontal wall check — reverse only, patrol bounds handle positioning
+      if (e.mx !== 0) {
+        const aheadX = e.mx > 0 ? (e.x + 15) : (e.x - 1);
+        if (isWall(world, aheadX, e.y) ||
+            ((e.y & 15) !== 0 && isWall(world, aheadX, e.y + 15))) {
+          e.mx = -e.mx;
+        }
+      }
+      // Vertical wall check — reverse only
+      if (e.my !== 0) {
+        const aheadY = e.my > 0 ? (e.y + 15) : (e.y - 1);
+        if (isSolid(world, e.x, aheadY) ||
+            ((e.x & 15) !== 0 && isSolid(world, e.x + 15, aheadY))) {
+          e.my = -e.my;
+        }
+      }
+    }
 
     // --- Platform riding (type == enemPlat) ---
     if (e.t === prefs.enemPlat) {
@@ -99,6 +139,22 @@ export function scrollMoveEnemies(
           }
         }
       }
+
+      // Platform wall collision
+      if (e.mx !== 0) {
+        const aheadX = e.mx > 0 ? (e.x + 15) : (e.x - 1);
+        if (isWall(world, aheadX, e.y) ||
+            ((e.y & 15) !== 0 && isWall(world, aheadX, e.y + 15))) {
+          e.mx = -e.mx;
+        }
+      }
+      if (e.my !== 0) {
+        const aheadY = e.my > 0 ? (e.y + 15) : (e.y - 1);
+        if (isSolid(world, e.x, aheadY) ||
+            ((e.x & 15) !== 0 && isSolid(world, e.x + 15, aheadY))) {
+          e.my = -e.my;
+        }
+      }
     } else {
       // --- Damage collision (AABB ±14 px) ---
       if (player.state !== STATENORMAL) continue;
@@ -117,8 +173,16 @@ export function scrollMoveEnemies(
       }
     }
 
-    // --- Boundary bounce ---
-    if (e.x === e.x1 || e.x === e.x2) e.mx = -e.mx;
-    if (e.y === e.y1 || e.y === e.y2) e.my = -e.my;
+    // --- Patrol boundary bounce (old screen boundaries) ---
+    if (e.x <= e.x1) { e.x = e.x1; e.mx = Math.abs(e.mx); }
+    else if (e.x >= e.x2) { e.x = e.x2; e.mx = -Math.abs(e.mx); }
+    if (e.y <= e.y1) { e.y = e.y1; e.my = Math.abs(e.my); }
+    else if (e.y >= e.y2) { e.y = e.y2; e.my = -Math.abs(e.my); }
+
+    // --- World-edge safety clamp ---
+    if (e.x < 0) { e.x = 0; e.mx = Math.abs(e.mx); }
+    else if (e.x > worldPxW - 16) { e.x = worldPxW - 16; e.mx = -Math.abs(e.mx); }
+    if (e.y < 0) { e.y = 0; e.my = Math.abs(e.my); }
+    else if (e.y > worldPxH - 16) { e.y = worldPxH - 16; e.my = -Math.abs(e.my); }
   }
 }
