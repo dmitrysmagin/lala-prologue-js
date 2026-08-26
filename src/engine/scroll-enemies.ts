@@ -3,8 +3,7 @@
  * Flat enemy array (all enemies from all screens, already world-converted).
  *
  * Movement: enemies patrol between x1/x2/y1/y2 bounds (old screen boundaries).
- * No wall/tile collision — matches original QB behavior where enemies only
- * reverse at their patrol limits.
+ * No tile collision — direction changes only at patrol limits and world edges.
  */
 import { STATENORMAL, STATEFLICKER } from "./types";
 import type { TypeEnems, TypePlayer, TypePrefs } from "./types";
@@ -22,7 +21,6 @@ function worldBehav(world: WorldBuff, tx: number, ty: number): number {
 export interface EnemyCollisionDebug {
   enemyRects: { x: number; y: number }[];
   patrolRects: { x1: number; y1: number; x2: number; y2: number }[];
-  collisionTiles: { tx: number; ty: number }[];
 }
 
 /**
@@ -149,6 +147,4 @@ export function scrollMoveEnemies(
     debug?.enemyRects.push({ x: e.x, y: e.y });
     debug?.patrolRects.push({ x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2 });
   }
-
-  if (debug) debug.collisionTiles = [];
 }

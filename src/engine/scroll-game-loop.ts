@@ -103,7 +103,7 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
 
   let debugMode = false;
   let debugDWasDown = false;
-  const collisionDebug: EnemyCollisionDebug = { enemyRects: [], patrolRects: [], collisionTiles: [] };
+  const collisionDebug: EnemyCollisionDebug = { enemyRects: [], patrolRects: [] };
 
   while (running) {
     await nextFrame();
@@ -127,7 +127,6 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
       // Clear debug data each tick
       collisionDebug.enemyRects.length = 0;
       collisionDebug.patrolRects.length = 0;
-      collisionDebug.collisionTiles.length = 0;
       scrollMoveEnemies(enemies, world, prefs, player, playSfx, debugMode ? collisionDebug : undefined);
 
       // Animation frame cycling
@@ -225,7 +224,7 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
       screen.blitSprite(LAYER_1, spriteset, e.sprId, sx - off.offX, sy - off.offY);
     }
 
-    // Debug overlay: white rects on enemies, pink rects on patrol bounds, red on collision tiles
+    // Debug overlay: white rects on enemies, pink rects on patrol bounds
     if (debugMode) {
       for (const r of collisionDebug.enemyRects) {
         const sx = r.x - camera.x + sp.x;
@@ -238,11 +237,6 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
         const sx2 = p.x2 - camera.x + sp.x + 15;
         const sy2 = p.y2 - camera.y + sp.y + 15;
         screen.drawRect(LAYER_1, sx1, sy1, sx2, sy2, 6);
-      }
-      for (const t of collisionDebug.collisionTiles) {
-        const sx = t.tx * 16 - camera.x + sp.x;
-        const sy = t.ty * 16 - camera.y + sp.y;
-        screen.drawRect(LAYER_1, sx, sy, sx + 15, sy + 15, 4);
       }
     }
 

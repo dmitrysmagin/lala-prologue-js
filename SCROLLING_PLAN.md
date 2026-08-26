@@ -40,11 +40,33 @@ ScrollPrefs       — extends TypePrefs with
 
 `scrollWorldPrepare(map, tileProperties, hotSpots, enems) → WorldBuff`
 
-- Iterates all `mapW * mapH = 36` screens
-- For each screen, copies its 20×12 tiles into the correct region of the 120×72 world buffer
-- Sets `behaviour` from `tileProperties`, `anim` flag, `realMapIndex`
-- Screen (sx, sy) maps to world offset: `(sy*screenH)*worldW + sx*screenW`
-- Called **once** at game start, not per-frame
+### How Screen-Per-Screen Tiles Become One Map
+
+The flat map stores tiles screen-by-screen: screen 0 (20×12), screen 1 (20×12), ... screen 29 (20×12). `buildWorldBuff` copies each screen's tiles into the correct region of the 120×72 world grid:
+
+```
+World layout (6 columns × 5 rows of 20×12 screens):
+
+  Screen 0    Screen 1    ...   Screen 5
+  Screen 6    Screen 7    ...   Screen 11
+  ...
+  Screen 24   Screen 25   ...   Screen 29
+
+World buffer indexing:
+  worldIdx = (worldBaseY + ty) * worldW + worldBaseX
+  where:
+    worldBaseX = sx * screenW    (0, 20, 40, 60, 80, 100)
+    worldBaseY = sy * screenH    (0, 12, 24, 36, 48)
+```
+
+For each tile in each screen:
+1. Look up `tileProperties[tileId]` to determine layer (BACK or ANIMATED)
+2. Copy tile ID to `world.layer1` (background) or `world.layer2` (foreground)
+3. Set `world.behaviour[worldIdx]` from tile properties flags
+4. Set `world.anim[worldIdx]` if tile is animated
+5. Store `world.realMapIndex[worldIdx]` as back-reference to flat map
+
+Called **once** at game start, not per-frame.
 
 ---
 
@@ -116,17 +138,62 @@ Changes vs current `player.ts`:
 
 **`src/engine/scroll-enemies.ts`** (new file, wraps `engineMoveEnems`)
 
-Changes:
-- Enemy positions become **world-absolute** instead of per-screen
-- On world buffer init, each enemy's position is offset by its screen's world position:
-  ```
-  e.x += sx * screenW * 16   // world pixel X
-  e.y += sy * screenH * 16   // world pixel Y
-  e.x1 += offset; e.x2 += offset  // boundaries too
-  ```
-- Movement unchanged (`e.x += e.mx`)
-- Rendering: `(e.x - camera.x, e.y - camera.y)` for screen position
-- No more per-screen `enems[nPant]` indexing — flat array of all enemies
+### ENEMS.TXT Coordinate System
+
+All values in ENEMS.TXT are **pixel coordinates** (not tile coords):
+- `x, y` — enemy starting position (0–319, 0–191)
+- `x1, y1, x2, y2` — patrol bounding box (pixel coords, may have x1 > x2)
+- `mx, my` — movement speed in pixels/tick (typically ±1–2)
+- `t` — enemy type (0 = empty, 1–3 = enemy types, 4 = platform)
+
+The flip-screen engine uses these values directly: `e.x += e.mx`, boundary check `e.x === e.x1`.
+
+### World Conversion (`convertEnemiesToWorld`)
+
+Converts per-screen enemy data to world-absolute pixel coordinates by adding screen offset:
+
+```
+offsetX = sx * screenW * 16   // e.g. screen 1 → +320px
+offsetY = sy * screenH * 16   // e.g. screen 2 → +192px
+
+e.x  += offsetX;   e.y  += offsetY;
+e.x1 += offsetX;   e.y1 += offsetY;
+e.x2 += offsetX;   e.y2 += offsetY;
+// mx/my unchanged — already pixel-speed
+```
+
+All six position fields are shifted by the same screen offset. Patrol bounds stay in the same coordinate space as positions, so `e.x === e.x1` boundary checks work correctly.
+
+### Patrol Bounds (Walking Limiters)
+
+Enemies patrol between `x1/x2` (horizontal) and `y1/y2` (vertical). Bounce uses **exact equality** matching the flip-screen engine:
+
+```
+if (e.x === e.x1 || e.x === e.x2) e.mx = -e.mx;
+if (e.y === e.y1 || e.y === e.y2) e.my = -e.my;
+```
+
+Note: some enemies have inverted bounds (x1 > x2). The `===` check handles this correctly — the enemy bounces when it reaches either bound, regardless of order.
+
+### World-Edge Safety Clamp
+
+Enemies are clamped to world boundaries as a fallback:
+```
+if (e.x < 0) e.x = 0;          if (e.x > worldPxW-16) e.x = worldPxW-16;
+if (e.y < 0) e.y = 0;          if (e.y > worldPxH-16) e.y = worldPxH-16;
+```
+
+### No Tile Collision
+
+Enemies do not collide with solid tiles. Direction changes happen only at patrol bounds and world edges. This matches the original flip-screen engine behavior.
+
+### Rendering
+
+Sprites drawn at world-absolute position offset by camera:
+```
+screenX = e.x - camera.x + screenPos.x
+screenY = e.y - camera.y + screenPos.y
+```
 
 ---
 
