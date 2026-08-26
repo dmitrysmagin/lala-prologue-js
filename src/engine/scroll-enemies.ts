@@ -1,6 +1,10 @@
 /**
- * Scroll-mode enemy AI — world-absolute positions, WorldBuff tile collision.
+ * Scroll-mode enemy AI — world-absolute positions.
  * Flat enemy array (all enemies from all screens, already world-converted).
+ *
+ * Movement: enemies patrol between x1/x2/y1/y2 bounds (old screen boundaries).
+ * No wall/tile collision — matches original QB behavior where enemies only
+ * reverse at their patrol limits.
  */
 import { STATENORMAL, STATEFLICKER } from "./types";
 import type { TypeEnems, TypePlayer, TypePrefs } from "./types";
@@ -9,28 +13,21 @@ import type { PlaySfx } from "./player";
 
 const noopSfx: PlaySfx = () => {};
 
-/** Look up behaviour from world buffer at pixel coords */
-function worldBehavAt(world: WorldBuff, px: number, py: number): number {
-  const tx = px >> 4;
-  const ty = py >> 4;
+/** Look up behaviour from world buffer at tile coords */
+function worldBehav(world: WorldBuff, tx: number, ty: number): number {
   if (tx < 0 || tx >= world.worldW || ty < 0 || ty >= world.worldH) return 0;
   return world.behaviour[ty * world.worldW + tx];
 }
 
-/** Check if a tile is solid for enemy movement (behaviour > 7 = wall) */
-function isWall(world: WorldBuff, px: number, py: number): boolean {
-  return worldBehavAt(world, px, py) > 7;
-}
-
-/** Check if a tile is solid for floor/ceiling (behaviour > 3) */
-function isSolid(world: WorldBuff, px: number, py: number): boolean {
-  return worldBehavAt(world, px, py) > 3;
+export interface EnemyCollisionDebug {
+  enemyRects: { x: number; y: number }[];
+  patrolRects: { x1: number; y1: number; x2: number; y2: number }[];
+  collisionTiles: { tx: number; ty: number }[];
 }
 
 /**
  * Move all world-absolute enemies, handle platform riding and damage.
- * @param enemies — flat array of all enemies (already world-converted)
- * @param world — world tile buffer for collision
+ * Enemies patrol between x1/x2/y1/y2. No tile collision.
  */
 export function scrollMoveEnemies(
   enemies: TypeEnems[],
@@ -38,6 +35,7 @@ export function scrollMoveEnemies(
   prefs: TypePrefs,
   player: TypePlayer,
   playSfx: PlaySfx = noopSfx,
+  debug?: EnemyCollisionDebug,
 ): void {
   player.gotten = 0;
 
@@ -58,26 +56,6 @@ export function scrollMoveEnemies(
     e.x += e.mx;
     e.y += e.my;
 
-    // --- Wall collision (non-platform enemies) ---
-    if (e.t !== prefs.enemPlat) {
-      // Horizontal wall check — reverse only, patrol bounds handle positioning
-      if (e.mx !== 0) {
-        const aheadX = e.mx > 0 ? (e.x + 15) : (e.x - 1);
-        if (isWall(world, aheadX, e.y) ||
-            ((e.y & 15) !== 0 && isWall(world, aheadX, e.y + 15))) {
-          e.mx = -e.mx;
-        }
-      }
-      // Vertical wall check — reverse only
-      if (e.my !== 0) {
-        const aheadY = e.my > 0 ? (e.y + 15) : (e.y - 1);
-        if (isSolid(world, e.x, aheadY) ||
-            ((e.x & 15) !== 0 && isSolid(world, e.x + 15, aheadY))) {
-          e.my = -e.my;
-        }
-      }
-    }
-
     // --- Platform riding (type == enemPlat) ---
     if (e.t === prefs.enemPlat) {
       const px = player.x >> 6;
@@ -92,8 +70,8 @@ export function scrollMoveEnemies(
           player.vy = 0;
           const xx = px >> 4;
           const yy = py >> 4;
-          if (worldBehavAt(world, xx << 4, yy << 4) > 7 ||
-              ((px & 15) !== 0 && worldBehavAt(world, (xx + 1) << 4, yy << 4) > 7)) {
+          if (worldBehav(world, xx, yy) > 7 ||
+              ((px & 15) !== 0 && worldBehav(world, xx + 1, yy) > 7)) {
             player.y = (yy + 1) << 10;
           }
         }
@@ -106,14 +84,14 @@ export function scrollMoveEnemies(
           player.vy = 0;
           const xx = px >> 4;
           const yy = py >> 4;
-          if (worldBehavAt(world, xx << 4, (yy + 1) << 4) > 3 ||
-              ((px & 15) !== 0 && worldBehavAt(world, (xx + 1) << 4, (yy + 1) << 4) > 3)) {
+          if (worldBehav(world, xx, yy + 1) > 3 ||
+              ((px & 15) !== 0 && worldBehav(world, xx + 1, yy + 1) > 3)) {
             player.y = yy << 10;
           }
         }
       }
 
-      // Horizontal platform
+      // Horizontal platform riding
       if (e.mx !== 0) {
         if (px >= e.x - 15 && px <= e.x + 15 &&
             py >= e.y - 16 && py <= e.y - 11 &&
@@ -125,34 +103,18 @@ export function scrollMoveEnemies(
           const xx = newPx >> 4;
           const yy = py >> 4;
           if (e.mx < 0) {
-            if (worldBehavAt(world, xx << 4, yy << 4) > 7 ||
-                ((py & 15) !== 0 && worldBehavAt(world, xx << 4, (yy + 1) << 4) > 7)) {
+            if (worldBehav(world, xx, yy) > 7 ||
+                ((py & 15) !== 0 && worldBehav(world, xx, yy + 1) > 7)) {
               player.vx = 0;
               player.x = (xx + 1) << 10;
             }
           } else if (e.mx > 0) {
-            if (worldBehavAt(world, (xx + 1) << 4, yy << 4) > 7 ||
-                ((py & 15) !== 0 && worldBehavAt(world, (xx + 1) << 4, (yy + 1) << 4) > 7)) {
+            if (worldBehav(world, xx + 1, yy) > 7 ||
+                ((py & 15) !== 0 && worldBehav(world, xx + 1, yy + 1) > 7)) {
               player.vx = 0;
               player.x = xx << 10;
             }
           }
-        }
-      }
-
-      // Platform wall collision
-      if (e.mx !== 0) {
-        const aheadX = e.mx > 0 ? (e.x + 15) : (e.x - 1);
-        if (isWall(world, aheadX, e.y) ||
-            ((e.y & 15) !== 0 && isWall(world, aheadX, e.y + 15))) {
-          e.mx = -e.mx;
-        }
-      }
-      if (e.my !== 0) {
-        const aheadY = e.my > 0 ? (e.y + 15) : (e.y - 1);
-        if (isSolid(world, e.x, aheadY) ||
-            ((e.x & 15) !== 0 && isSolid(world, e.x + 15, aheadY))) {
-          e.my = -e.my;
         }
       }
     } else {
@@ -173,16 +135,20 @@ export function scrollMoveEnemies(
       }
     }
 
-    // --- Patrol boundary bounce (old screen boundaries) ---
-    if (e.x <= e.x1) { e.x = e.x1; e.mx = Math.abs(e.mx); }
-    else if (e.x >= e.x2) { e.x = e.x2; e.mx = -Math.abs(e.mx); }
-    if (e.y <= e.y1) { e.y = e.y1; e.my = Math.abs(e.my); }
-    else if (e.y >= e.y2) { e.y = e.y2; e.my = -Math.abs(e.my); }
+    // --- Boundary bounce (flip-screen uses exact equality) ---
+    if (e.x === e.x1 || e.x === e.x2) e.mx = -e.mx;
+    if (e.y === e.y1 || e.y === e.y2) e.my = -e.my;
 
     // --- World-edge safety clamp ---
     if (e.x < 0) { e.x = 0; e.mx = Math.abs(e.mx); }
     else if (e.x > worldPxW - 16) { e.x = worldPxW - 16; e.mx = -Math.abs(e.mx); }
     if (e.y < 0) { e.y = 0; e.my = Math.abs(e.my); }
     else if (e.y > worldPxH - 16) { e.y = worldPxH - 16; e.my = -Math.abs(e.my); }
+
+    // --- Record final position for debug ---
+    debug?.enemyRects.push({ x: e.x, y: e.y });
+    debug?.patrolRects.push({ x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2 });
   }
+
+  if (debug) debug.collisionTiles = [];
 }

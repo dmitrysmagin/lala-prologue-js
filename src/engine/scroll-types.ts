@@ -104,12 +104,9 @@ export function convertEnemiesToWorld(
       const offsetX = sx * prefs.screenW * 16; // pixel offset
       const offsetY = sy * prefs.screenH * 16;
       for (const e of screen) {
-        e.x += offsetX;
-        e.y += offsetY;
-        e.x1 += offsetX;
-        e.x2 += offsetX;
-        e.y1 += offsetY;
-        e.y2 += offsetY;
+        e.x  += offsetX;  e.y  += offsetY;
+        e.x1 += offsetX;  e.y1 += offsetY;
+        e.x2 += offsetX;  e.y2 += offsetY;
       }
     }
   }

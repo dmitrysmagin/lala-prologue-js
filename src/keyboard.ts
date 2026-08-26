@@ -14,6 +14,7 @@ export const SC_DOWN  = 0x50;
 export const SC_W     = 0x11;
 export const SC_E     = 0x12;
 export const SC_R     = 0x13;
+export const SC_D     = 0x20;
 
 // Full map code -> scancode (extendable, but spec minimum is above)
 const CODE_TO_SCANCODE: Record<string, number> = {

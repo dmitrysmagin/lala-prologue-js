@@ -3,14 +3,14 @@
  * Replaces engineDoGame when config.scrollEnabled is true.
  */
 import { Screen, LAYER_1, LAYER_2, LAYER_3, VIDEO } from "../screen";
-import { Keyboard, SC_W, SC_E, SC_R } from "../keyboard";
+import { Keyboard, SC_W, SC_E, SC_R, SC_D } from "../keyboard";
 import type { TypePrefs, TypePlayer, TypeSpriteProperties, TypeHotSpots } from "./types";
 import { config } from "./config";
 import type { WorldBuff, Camera } from "./scroll-types";
 import { updateCamera } from "./scroll-camera";
 import { scrollDrawLayer1, scrollDrawLayer2 } from "./scroll-render";
 import { scrollMovePlayer } from "./scroll-player";
-import { scrollMoveEnemies } from "./scroll-enemies";
+import { scrollMoveEnemies, type EnemyCollisionDebug } from "./scroll-enemies";
 import { enginePrintStats, engineRprint } from "./render";
 import { PCXLoader } from "../assets/PCXLoader";
 import type { PlaySfx, StopSfx } from "./player";
@@ -101,6 +101,10 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
 
   const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
+  let debugMode = false;
+  let debugDWasDown = false;
+  const collisionDebug: EnemyCollisionDebug = { enemyRects: [], patrolRects: [], collisionTiles: [] };
+
   while (running) {
     await nextFrame();
 
@@ -112,9 +116,19 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
     const tickNow = logicAccum >= 1.0;
     if (tickNow) logicAccum -= 1.0;
 
+    // --- Debug toggle (D key, edge-triggered) ---
+    const dDown = keyboard.isDown(SC_D);
+    if (dDown && !debugDWasDown) debugMode = !debugMode;
+    debugDWasDown = dDown;
+
     if (tickNow) {
       scrollMovePlayer(keyboard, world, player, prefs, map, playSfx);
-      scrollMoveEnemies(enemies, world, prefs, player, playSfx);
+
+      // Clear debug data each tick
+      collisionDebug.enemyRects.length = 0;
+      collisionDebug.patrolRects.length = 0;
+      collisionDebug.collisionTiles.length = 0;
+      scrollMoveEnemies(enemies, world, prefs, player, playSfx, debugMode ? collisionDebug : undefined);
 
       // Animation frame cycling
       subFrame = (subFrame + 1) & 3;
@@ -209,6 +223,27 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
       if (sx < -24 || sx > 320 || sy < -24 || sy > 200) continue;
       const off = spriteProperties[e.sprId] ?? { offX: 0, offY: 0 };
       screen.blitSprite(LAYER_1, spriteset, e.sprId, sx - off.offX, sy - off.offY);
+    }
+
+    // Debug overlay: white rects on enemies, pink rects on patrol bounds, red on collision tiles
+    if (debugMode) {
+      for (const r of collisionDebug.enemyRects) {
+        const sx = r.x - camera.x + sp.x;
+        const sy = r.y - camera.y + sp.y;
+        screen.drawRect(LAYER_1, sx, sy, sx + 15, sy + 15, 15);
+      }
+      for (const p of collisionDebug.patrolRects) {
+        const sx1 = p.x1 - camera.x + sp.x;
+        const sy1 = p.y1 - camera.y + sp.y;
+        const sx2 = p.x2 - camera.x + sp.x + 15;
+        const sy2 = p.y2 - camera.y + sp.y + 15;
+        screen.drawRect(LAYER_1, sx1, sy1, sx2, sy2, 6);
+      }
+      for (const t of collisionDebug.collisionTiles) {
+        const sx = t.tx * 16 - camera.x + sp.x;
+        const sy = t.ty * 16 - camera.y + sp.y;
+        screen.drawRect(LAYER_1, sx, sy, sx + 15, sy + 15, 4);
+      }
     }
 
     // Animated layer2 tiles
