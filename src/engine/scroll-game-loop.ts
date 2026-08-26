@@ -108,9 +108,6 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
   while (running) {
     await nextFrame();
 
-    // --- Camera updates every frame (smooth) ---
-    updateCamera(camera, player, worldPxW, worldPxH);
-
     // --- Physics ticks via accumulator ---
     logicAccum += config.gameSpeed;
     const tickNow = logicAccum >= 1.0;
@@ -161,6 +158,9 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
         if (sid < spriteMapping.length) e.sprId = spriteMapping[sid] ?? e.sprId;
       }
     }
+
+    // --- Camera after physics (so player stays centered on tick frames) ---
+    updateCamera(camera, player, worldPxW, worldPxH);
 
     // --- Hotspot collection ---
     {
