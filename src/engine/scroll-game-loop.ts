@@ -180,10 +180,11 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
     }
 
     // --- Render ---
-    // Restore backdrop from LAYER_3, then draw tiles on top
+    // Restore backdrop from LAYER_3, then draw all tile layers on top
     const sp = prefs.screenPos;
     screen.copyLayer(LAYER_3, LAYER_2);
     scrollDrawLayer1(screen, world, camera, tileset, LAYER_2, sp);
+    scrollDrawLayer2(screen, world, camera, tileset, frame, LAYER_2, sp);
 
     // Composite: LAYER_2 → LAYER_1
     screen.copyLayer(LAYER_2, LAYER_1);
@@ -239,9 +240,6 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
         screen.drawRect(LAYER_1, sx1, sy1, sx2, sy2, 6);
       }
     }
-
-    // Animated layer2 tiles
-    scrollDrawLayer2(screen, world, camera, tileset, frame, LAYER_1, sp);
 
     // HUD stats (fixed position)
     enginePrintStats(screen, player, prefs, tileset);
