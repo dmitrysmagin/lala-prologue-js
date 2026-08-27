@@ -15,6 +15,7 @@ export const SC_W     = 0x11;
 export const SC_E     = 0x12;
 export const SC_R     = 0x13;
 export const SC_D     = 0x20;
+export const SC_S     = 0x1F;
 
 // Full map code -> scancode (extendable, but spec minimum is above)
 const CODE_TO_SCANCODE: Record<string, number> = {
@@ -45,6 +46,8 @@ for (const [code, sc] of Object.entries(CODE_TO_SCANCODE)) {
 
 export class Keyboard {
   private pressed = new Set<number>();
+  /** Tracks keys that were newly pressed since last clearJustPressed() */
+  private _justPressed = new Set<number>();
   /** scancode FIFO for readKey() */
   private scanQueue: number[] = [];
   /** char FIFO for inkey() — mirrors DQBinkey$ */
@@ -72,6 +75,7 @@ export class Keyboard {
 
       // Queue scancode only on initial press (no auto-repeat)
       if (!e.repeat || !wasDown) {
+        this._justPressed.add(sc);
         this.scanQueue.push(sc);
         // Char queue: push printable char if available
         // For spec keys, Enter → "\r", otherwise e.key single char
@@ -136,6 +140,16 @@ export class Keyboard {
   /** Direct scancode test — matches QB `isDown(sc)` */
   isDown(scancode: number): boolean {
     return this.pressed.has(scancode & 0xff);
+  }
+
+  /** True if scancode was pressed since last clearJustPressed() call (single-press edge) */
+  justPressed(scancode: number): boolean {
+    return this._justPressed.has(scancode & 0xff);
+  }
+
+  /** Clear just-pressed state — call once per frame or per input cycle */
+  clearJustPressed(): void {
+    this._justPressed.clear();
   }
 
   /** Test by DOM code string (convenience) */

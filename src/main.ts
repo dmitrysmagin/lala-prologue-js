@@ -103,6 +103,7 @@ async function main() {
   // Wait for BOTH: user pressed Enter AND data is loaded
   const [titleRes, data] = await Promise.all([titlePromise, dataPromise]);
   console.log(`[main] title -> ${titleRes.reason}, data loaded`);
+  config.scrollEnabled = titleRes.scrollEnabled;
 
   await music.fadeOut(250).catch(() => {});
   await screen.fadeTo(0, 0, 0, 8).catch(() => {});
@@ -115,14 +116,14 @@ async function main() {
   const player = createPlayer(data.prefs);
   const curScreenBuff = createCurScreenBuff();
 
-  // Build world buffer for scroll engine (built once, reused)
+  // Build world buffer for scroll engine (always built, used when scrollEnabled)
   let world: WorldBuff | null = null;
   let scrollCamera: Camera = { x: 0, y: 0 };
   let worldHotSpots = data.hotSpots; // default: per-screen (flip engine)
   let backdrop: { width: number; height: number; data: Uint8Array } | null = null;
   let initialFlatEnemies: { x: number; y: number; x1: number; y1: number; x2: number; y2: number; mx: number; my: number }[] = [];
   let origMap: Uint8Array | null = null; // preserve pristine map for restart
-  if (config.scrollEnabled) {
+  {
     // Keep an untouched copy — scrollClearKeyHole mutates data.map in place
     origMap = new Uint8Array(data.map);
     world = buildWorldBuff(data.map, data.tileProperties, data.prefs);
@@ -243,7 +244,7 @@ async function main() {
 
     // Win → show ending before returning to title
     if (res === -1) {
-      await showEnding(screen, music);
+      await showEnding(screen, music, keyboard);
       await screen.fadeTo(0, 0, 0, 10).catch(() => {});
     }
 
@@ -257,6 +258,7 @@ async function main() {
       fadeFrames: 12,
     });
     console.log(`[main] title -> ${titleRes2.reason}`);
+    config.scrollEnabled = titleRes2.scrollEnabled;
     await music.fadeOut(250).catch(() => {});
     await screen.fadeTo(0, 0, 0, 8).catch(() => {});
     keyboard.clear();

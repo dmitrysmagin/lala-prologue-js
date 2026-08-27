@@ -5,10 +5,12 @@
  * Input: ANY keydown (Enter/Space/arrows/anything) or canvas click = start.
  */
 import { Screen, VIDEO, LAYER_1, LAYER_3 } from "../screen";
+import { Keyboard, SC_LEFT, SC_RIGHT, SC_ENTER } from "../keyboard";
 import { PCXLoader } from "../assets/PCXLoader";
 import { loadGameFont } from "../assets/fnt-cache";
 import { dqbPrint } from "../engine/render";
 import type { MusicPlayer } from "../audio/music-player";
+import { config } from "../engine/config";
 
 /** BMA blender map for filterBox — cached after first fetch */
 let _bmaCache: Uint8Array | null = null;
@@ -59,11 +61,12 @@ function blitPcxToLayer(
 
 export interface ShowTitleResult {
   reason: "enter";
+  scrollEnabled: boolean;
 }
 
 export async function showTitle(
   screen: Screen,
-  _keyboard: unknown,
+  keyboard: Keyboard,
   musicPlayer?: MusicPlayer,
   opts?: { titlePath?: string; musicPath?: string; fadeFrames?: number },
 ): Promise<ShowTitleResult> {
@@ -135,19 +138,18 @@ export async function showTitle(
       resolved = true;
       console.log("[title] input received — starting game");
       cleanup();
-      resolve({ reason: "enter" });
+      resolve({ reason: "enter", scrollEnabled: config.scrollEnabled });
     }
 
-    function onKeyDown(e: KeyboardEvent) {
-      e.preventDefault();
-      start();
+    function toggleMode() {
+      config.scrollEnabled = !config.scrollEnabled;
+      console.log("[title] game mode:", config.scrollEnabled ? "scrolling" : "flip-screen");
     }
+
     function onClick() {
       start();
     }
 
-    window.addEventListener("keydown", onKeyDown);
-    document.addEventListener("keydown", onKeyDown, true);
     screen.canvas.addEventListener("click", onClick);
     document.addEventListener("click", onClick);
     screen.canvas.addEventListener("touchstart", onClick, { passive: true });
@@ -157,8 +159,20 @@ export async function showTitle(
     function onFrame() {
       if (resolved) return;
 
+      // Poll keyboard — single global listener in Keyboard class
+      if (keyboard.justPressed(SC_LEFT) || keyboard.justPressed(SC_RIGHT)) toggleMode();
+      if (keyboard.justPressed(SC_ENTER) || keyboard.isDown(0x39)) start(); // 0x39 = Space
+      keyboard.clearJustPressed();
+
       // Redraw title background each frame (clean slate for filterBox)
       screen.copyLayer(LAYER_3, LAYER_1);
+
+      // Game mode toggle — above the "PRESS ENTER" box
+      const modeLabel = config.scrollEnabled ? "GAME MODE: SCROLLING" : "GAME MODE: FLIP-SCREEN";
+      // Shadow
+      dqbPrint(screen, LAYER_1, modeLabel, 88, 120, 0);
+      // Foreground
+      dqbPrint(screen, LAYER_1, modeLabel, 87, 119, 1);
 
       // FilterBox + text (matches QB: DQBfilterBox 1, 80, 136, 239, 151, 255, 1)
       screen.filterBox(LAYER_1, 80, 136, 239, 151, 255, bma);
@@ -181,8 +195,6 @@ export async function showTitle(
 
     function cleanup() {
       cancelAnimationFrame(raf);
-      window.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("keydown", onKeyDown, true);
       screen.canvas.removeEventListener("click", onClick);
       document.removeEventListener("click", onClick);
       screen.canvas.removeEventListener("touchstart", onClick);

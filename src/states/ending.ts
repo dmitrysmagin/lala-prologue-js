@@ -3,6 +3,7 @@
  * Port of LALA.BAS showEnding — ENDING.PCX + typewriter text.
  */
 import { Screen, VIDEO, LAYER_1, LAYER_3 } from "../screen";
+import { Keyboard } from "../keyboard";
 import { PCXLoader } from "../assets/PCXLoader";
 import { loadGameFont } from "../assets/fnt-cache";
 import { dqbPrint } from "../engine/render";
@@ -63,6 +64,7 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()
 export async function showEnding(
   screen: Screen,
   musicPlayer?: MusicPlayer,
+  keyboard?: Keyboard,
 ): Promise<void> {
   await loadGameFont("/GFX/lala.fnt").catch(() => null);
   const bma = await getBma();
@@ -129,20 +131,27 @@ export async function showEnding(
     for (let d = 0; d < 120; d++) await nextFrame();
   }
 
-  // Wait for any keypress
+  // Wait for any keypress or click
   await new Promise<void>((resolve) => {
-    function onKey(e: KeyboardEvent) { e.preventDefault(); cleanup(); resolve(); }
-    function onClick() { cleanup(); resolve(); }
+    let resolved = false;
+    let raf = 0;
+    function done() { if (!resolved) { resolved = true; cancelAnimationFrame(raf); cleanup(); resolve(); } }
+    function onClick() { done(); }
     function cleanup() {
-      window.removeEventListener("keydown", onKey);
-      document.removeEventListener("keydown", onKey, true);
       screen.canvas.removeEventListener("click", onClick);
       document.removeEventListener("click", onClick);
     }
-    window.addEventListener("keydown", onKey);
-    document.addEventListener("keydown", onKey, true);
     screen.canvas.addEventListener("click", onClick);
     document.addEventListener("click", onClick);
+
+    if (keyboard) {
+      function onFrame() {
+        if (resolved) return;
+        if (keyboard!.readKey() !== 0) { done(); return; }
+        raf = requestAnimationFrame(onFrame);
+      }
+      raf = requestAnimationFrame(onFrame);
+    }
   });
 
   if (musicPlayer) musicPlayer.stop();
