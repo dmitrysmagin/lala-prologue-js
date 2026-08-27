@@ -155,9 +155,11 @@ export async function showTitle(
     screen.canvas.addEventListener("touchstart", onClick, { passive: true });
 
     let raf = 0;
+    let titleFrame = 0;
 
     function onFrame() {
       if (resolved) return;
+      titleFrame++;
 
       // Poll keyboard — single global listener in Keyboard class
       if (keyboard.justPressed(SC_LEFT) || keyboard.justPressed(SC_RIGHT)) toggleMode();
@@ -174,12 +176,15 @@ export async function showTitle(
       // Foreground
       dqbPrint(screen, LAYER_1, modeLabel, 87, 119, 1);
 
-      // FilterBox + text (matches QB: DQBfilterBox 1, 80, 136, 239, 151, 255, 1)
-      screen.filterBox(LAYER_1, 80, 136, 239, 151, 255, bma);
-      // Shadow: DQBprint 1, "PRESS ENTER TO PLAY", 89, 141, 0
-      dqbPrint(screen, LAYER_1, "PRESS ENTER TO PLAY", 89, 141, 0);
-      // Foreground: DQBprint 1, "PRESS ENTER TO PLAY", 88, 140, 1
-      dqbPrint(screen, LAYER_1, "PRESS ENTER TO PLAY", 88, 140, 1);
+      // Flash: show 48 frames, hide 48 frames (~0.6 Hz)
+      if ((titleFrame % 96) < 48) {
+        // FilterBox + text (matches QB: DQBfilterBox 1, 80, 136, 239, 151, 255, 1)
+        screen.filterBox(LAYER_1, 80, 136, 239, 151, 255, bma);
+        // Shadow: DQBprint 1, "PRESS ENTER TO PLAY", 89, 141, 0
+        dqbPrint(screen, LAYER_1, "PRESS ENTER TO PLAY", 89, 141, 0);
+        // Foreground: DQBprint 1, "PRESS ENTER TO PLAY", 88, 140, 1
+        dqbPrint(screen, LAYER_1, "PRESS ENTER TO PLAY", 88, 140, 1);
+      }
 
       screen.copyLayer(LAYER_1, VIDEO);
       screen.present();
