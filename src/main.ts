@@ -121,7 +121,10 @@ async function main() {
   let worldHotSpots = data.hotSpots; // default: per-screen (flip engine)
   let backdrop: { width: number; height: number; data: Uint8Array } | null = null;
   let initialFlatEnemies: { x: number; y: number; x1: number; y1: number; x2: number; y2: number; mx: number; my: number }[] = [];
+  let origMap: Uint8Array | null = null; // preserve pristine map for restart
   if (config.scrollEnabled) {
+    // Keep an untouched copy — scrollClearKeyHole mutates data.map in place
+    origMap = new Uint8Array(data.map);
     world = buildWorldBuff(data.map, data.tileProperties, data.prefs);
     convertEnemiesToWorld(data.enems, data.prefs);
     worldHotSpots = convertHotSpotsToWorld(data.hotSpots, data.prefs);
@@ -152,12 +155,16 @@ async function main() {
     player.gameOver = 0;
     for (const hs of data.hotSpots) hs.s = true;
     if (config.scrollEnabled) {
+      // Rebuild world buffer from restored map (doors, behaviours, etc.)
+      world = buildWorldBuff(data.map, data.tileProperties, data.prefs);
+      // Recalculate world-absolute enemy positions from restored map
+      convertEnemiesToWorld(data.enems, data.prefs);
+      worldHotSpots = convertHotSpotsToWorld(data.hotSpots, data.prefs);
       // Recalculate player starting position in world-absolute coords
       const sx = prefs.iniPant % prefs.mapW;
       const sy = Math.floor(prefs.iniPant / prefs.mapW);
       player.x = (sx * prefs.screenW + prefs.iniTX) * 16 * 64;
       player.y = (sy * prefs.screenH + prefs.iniTY) * 16 * 64;
-      worldHotSpots = convertHotSpotsToWorld(data.hotSpots, data.prefs);
       // Restore initial enemy positions
       const flat = data.enems.flat();
       for (let i = 0; i < flat.length && i < initialFlatEnemies.length; i++) {
@@ -168,9 +175,12 @@ async function main() {
         flat[i].mx = init.mx; flat[i].my = init.my;
       }
       // Reset camera to starting screen
-      scrollCamera.x = sx * data.prefs.screenW * 16;
-      scrollCamera.y = sy * data.prefs.screenH * 16;
+      scrollCamera.x = sx * prefs.screenW * 16;
+      scrollCamera.y = sy * prefs.screenH * 16;
     }
+
+    // Restore pristine map before starting game (both engines mutate it)
+    if (origMap) data.map.set(origMap);
 
     await screen.fadeIn(data.tilesetSheet.palette!, 10);
     try {
