@@ -121,18 +121,17 @@ async function main() {
   let scrollCamera: Camera = { x: 0, y: 0 };
   let worldHotSpots = data.hotSpots; // default: per-screen (flip engine)
   let backdrop: { width: number; height: number; data: Uint8Array } | null = null;
-  let initialFlatEnemies: { x: number; y: number; x1: number; y1: number; x2: number; y2: number; mx: number; my: number }[] = [];
   let origMap: Uint8Array | null = null; // preserve pristine map for restart
+  let origEnemyData: { x: number; y: number; x1: number; y1: number; x2: number; y2: number; mx: number; my: number }[][] | null = null;
   {
-    // Keep an untouched copy — scrollClearKeyHole mutates data.map in place
+    // Keep untouched copies — scrollClearKeyHole mutates map, convertEnemiesToWorld mutates positions
     origMap = new Uint8Array(data.map);
+    origEnemyData = data.enems.map(screen => screen.map(e => ({
+      x: e.x, y: e.y, x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, mx: e.mx, my: e.my,
+    })));
     world = buildWorldBuff(data.map, data.tileProperties, data.prefs);
     convertEnemiesToWorld(data.enems, data.prefs);
     worldHotSpots = convertHotSpotsToWorld(data.hotSpots, data.prefs);
-    // Save initial world-absolute enemy positions for restart
-    initialFlatEnemies = data.enems.flat().map(e => ({
-      x: e.x, y: e.y, x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, mx: e.mx, my: e.my,
-    }));
     // Position camera on starting screen
     const sx = data.prefs.iniPant % data.prefs.mapW;
     const sy = Math.floor(data.prefs.iniPant / data.prefs.mapW);
@@ -155,26 +154,28 @@ async function main() {
     player.objects = 0;
     player.gameOver = 0;
     for (const hs of data.hotSpots) hs.s = true;
+    // Restore original enemy data (convertEnemiesToWorld mutates in place)
+    if (origEnemyData) {
+      for (let s = 0; s < data.enems.length && s < origEnemyData.length; s++) {
+        for (let i = 0; i < data.enems[s].length && i < origEnemyData[s].length; i++) {
+          const o = origEnemyData[s][i];
+          const e = data.enems[s][i];
+          e.x = o.x; e.y = o.y; e.x1 = o.x1; e.y1 = o.y1;
+          e.x2 = o.x2; e.y2 = o.y2; e.mx = o.mx; e.my = o.my;
+        }
+      }
+    }
     if (config.scrollEnabled) {
       // Rebuild world buffer from restored map (doors, behaviours, etc.)
       world = buildWorldBuff(data.map, data.tileProperties, data.prefs);
-      // Recalculate world-absolute enemy positions from restored map
+      // Recalculate world-absolute enemy positions from restored per-screen data
       convertEnemiesToWorld(data.enems, data.prefs);
       worldHotSpots = convertHotSpotsToWorld(data.hotSpots, data.prefs);
-      // Recalculate player starting position in world-absolute coords
+      // Player starting position in world-absolute coords
       const sx = prefs.iniPant % prefs.mapW;
       const sy = Math.floor(prefs.iniPant / prefs.mapW);
       player.x = (sx * prefs.screenW + prefs.iniTX) * 16 * 64;
       player.y = (sy * prefs.screenH + prefs.iniTY) * 16 * 64;
-      // Restore initial enemy positions
-      const flat = data.enems.flat();
-      for (let i = 0; i < flat.length && i < initialFlatEnemies.length; i++) {
-        const init = initialFlatEnemies[i];
-        flat[i].x = init.x; flat[i].y = init.y;
-        flat[i].x1 = init.x1; flat[i].y1 = init.y1;
-        flat[i].x2 = init.x2; flat[i].y2 = init.y2;
-        flat[i].mx = init.mx; flat[i].my = init.my;
-      }
       // Reset camera to starting screen
       scrollCamera.x = sx * prefs.screenW * 16;
       scrollCamera.y = sy * prefs.screenH * 16;
