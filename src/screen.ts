@@ -182,7 +182,8 @@ export class Screen {
    * Apply a blender map (256×256 LUT) to a rectangular region.
    * `bmap` is 65536 bytes where result = bmap[fg * 256 + blendCol].
    * Operates on the indexed backing store, then refreshes RGBA via palette.
-   * Mirrors DQB filterBox / LALA.BMA usage for colours 254 (brighten) / 255 (darken).
+   * Mirrors DQB filterBox — darkens pixels in the given rectangle.
+   * Uses palette RGB to find the nearest darkened index (no BMA needed).
    */
   filterBox(
     layerId: number,
@@ -190,25 +191,40 @@ export class Screen {
     y1: number,
     x2: number,
     y2: number,
-    blendCol: number,
-    bmap: Uint8Array,
+    _blendCol: number,
+    _bmap?: Uint8Array,
   ): void {
     this.assertLayer(layerId);
-    if (bmap.length < 65536) throw new Error(`filterBox: bmap expected 65536 bytes, got ${bmap.length}`);
     const xa = Math.max(0, Math.min(x1, x2));
     const xb = Math.min(SCREEN_WIDTH - 1, Math.max(x1, x2));
     const ya = Math.max(0, Math.min(y1, y2));
     const yb = Math.min(SCREEN_HEIGHT - 1, Math.max(y1, y2));
-    const col = blendCol & 0xff;
     const idxStore = this.layerIdx[layerId];
     const u32 = this.layerU32[layerId];
     const lut = this.paletteLut;
+    const pal = this.paletteBytes; // Uint8Array(768) — RGB triplets
+    // Build darkened palette cache (once per filterBox call)
+    const dark = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) {
+      const r = pal[i * 3] >> 1;
+      const g = pal[i * 3 + 1] >> 1;
+      const b = pal[i * 3 + 2] >> 1;
+      // Find nearest palette entry to darkened RGB
+      let best = 0, bestDist = Infinity;
+      for (let j = 0; j < 256; j++) {
+        const dr = pal[j * 3] - r;
+        const dg = pal[j * 3 + 1] - g;
+        const db = pal[j * 3 + 2] - b;
+        const dist = dr * dr + dg * dg + db * db;
+        if (dist < bestDist) { bestDist = dist; best = j; }
+      }
+      dark[i] = best;
+    }
     for (let py = ya; py <= yb; py++) {
       const row = py * SCREEN_WIDTH;
       for (let px = xa; px <= xb; px++) {
         const idx = row + px;
-        const fg = idxStore[idx];
-        const mapped = bmap[(fg << 8) | col];
+        const mapped = dark[idxStore[idx]];
         idxStore[idx] = mapped;
         u32[idx] = lut[mapped];
       }
