@@ -103,10 +103,12 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
 
   let debugMode = false;
   let debugDWasDown = false;
+  let flickerFrame = 0;
   const collisionDebug: EnemyCollisionDebug = { enemyRects: [], patrolRects: [] };
 
   while (running) {
     await nextFrame();
+    flickerFrame++;
 
     // --- Physics ticks via accumulator ---
     logicAccum += config.gameSpeed;
@@ -206,7 +208,7 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
 
     // Player sprite
     if (!player.gameOver) {
-      const showPlayer = player.state === 0 || logicAccum < 0.5;
+      const showPlayer = player.state === 0 || (flickerFrame & 4) === 0;
       if (showPlayer) {
         const px = (player.x >> 6) - camera.x + sp.x;
         const py = (player.y >> 6) - camera.y + sp.y;

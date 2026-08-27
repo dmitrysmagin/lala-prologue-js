@@ -124,6 +124,7 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
   let frame = 0;
   let subFrame = 0;
   let logicAccum = 0;   // fractional accumulator — physics fires when >= 1.0
+  let flickerFrame = 0;
 
   // Ensure player position matches iniTX/TY if flag
   if (flag) {
@@ -148,6 +149,7 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
   while (running) {
     // --- Frame pacing ---
     await nextFrame();
+    flickerFrame++;
     logicAccum += config.gameSpeed;
     const tickNow = logicAccum >= 1.0;
     if (tickNow) logicAccum -= 1.0; // consume one tick worth, keep remainder
@@ -246,8 +248,8 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
     if (!player.gameOver) {
       const px = player.x >> 6;
       const py = player.y >> 6;
-      // Flicker state: blink using accumulator fraction (~30 Hz at speed 1.0)
-      const showPlayer = player.state === 0 || logicAccum < 0.5;
+      // Flicker state: blink using dedicated frame counter (~7.5 Hz)
+      const showPlayer = player.state === 0 || (flickerFrame & 4) === 0;
       if (showPlayer) {
         const sid = player.sprId;
         const off = spriteProperties[sid] ?? { offX: 0, offY: 0 };
