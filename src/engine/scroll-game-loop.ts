@@ -99,33 +99,43 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
   // Initialize camera on player
   updateCamera(camera, player, worldPxW, worldPxH);
 
-  const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+  // Render every RAF, but tick physics on wall-clock time so speed is
+  // identical on 60Hz/120Hz/etc: ticks/sec = 60 * config.gameSpeed.
+  const nextFrame = () => new Promise<number>((r) => requestAnimationFrame((t) => r(t)));
+  let last = performance.now();
 
   let debugMode = false;
   let debugDWasDown = false;
-  let flickerFrame = 0;
+  let flickerTime = 0;
   const collisionDebug: EnemyCollisionDebug = { enemyRects: [], patrolRects: [] };
 
   while (running) {
-    await nextFrame();
-    flickerFrame++;
+    const now = await nextFrame();
+    let dt = (now - last) / 1000;
+    last = now;
+    if (!Number.isFinite(dt) || dt < 0) dt = 0;
+    if (dt > 0.1) dt = 0.1; // tab-switch guard — no spiral of death
 
-    // --- Physics ticks via accumulator ---
-    logicAccum += config.gameSpeed;
-    const tickNow = logicAccum >= 1.0;
-    if (tickNow) logicAccum -= 1.0;
+    // --- Physics ticks via wall-clock accumulator (catch-up capped) ---
+    logicAccum += dt * 60 * config.gameSpeed;
+    flickerTime += dt;
 
     // --- Debug toggle (D key, edge-triggered) ---
     const dDown = keyboard.isDown(SC_D);
     if (dDown && !debugDWasDown) debugMode = !debugMode;
     debugDWasDown = dDown;
 
-    if (tickNow) {
+    // Clear debug data each frame
+    collisionDebug.enemyRects.length = 0;
+    collisionDebug.patrolRects.length = 0;
+
+    let ticks = 0;
+    while (logicAccum >= 1.0 && ticks < 5) {
+      logicAccum -= 1.0;
+      ticks++;
+
       scrollMovePlayer(keyboard, world, player, prefs, map, playSfx);
 
-      // Clear debug data each tick
-      collisionDebug.enemyRects.length = 0;
-      collisionDebug.patrolRects.length = 0;
       scrollMoveEnemies(enemies, world, prefs, player, playSfx, debugMode ? collisionDebug : undefined);
 
       // Animation frame cycling
@@ -208,7 +218,7 @@ export async function scrollDoGame(opts: ScrollDoGameOpts): Promise<ScrollDoGame
 
     // Player sprite
     if (!player.gameOver) {
-      const showPlayer = player.state === 0 || (flickerFrame & 4) === 0;
+      const showPlayer = player.state === 0 || (Math.floor(flickerTime * 15) & 1) === 0;
       if (showPlayer) {
         const px = (player.x >> 6) - camera.x + sp.x;
         const py = (player.y >> 6) - camera.y + sp.y;

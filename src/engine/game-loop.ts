@@ -123,8 +123,8 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
 
   let frame = 0;
   let subFrame = 0;
-  let logicAccum = 0;   // fractional accumulator — physics fires when >= 1.0
-  let flickerFrame = 0;
+  let logicAccum = 0;   // wall-clock accumulator — physics fires when >= 1.0
+  let flickerTime = 0;  // seconds, for refresh-independent flicker blink
 
   // Ensure player position matches iniTX/TY if flag
   if (flag) {
@@ -143,31 +143,72 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
     if (prefs.bgL2) playSfx(prefs.bgL2, true);
   }
 
-  // DQBwait simulation: RAF throttles to 60fps
-  const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+  // Render every RAF, but tick physics on wall-clock time so speed is
+  // identical on 60Hz/120Hz/etc: ticks/sec = 60 * config.gameSpeed.
+  const nextFrame = () => new Promise<number>((r) => requestAnimationFrame((t) => r(t)));
+  let last = performance.now();
 
   while (running) {
     // --- Frame pacing ---
-    await nextFrame();
-    flickerFrame++;
-    logicAccum += config.gameSpeed;
-    const tickNow = logicAccum >= 1.0;
-    if (tickNow) logicAccum -= 1.0; // consume one tick worth, keep remainder
+    const now = await nextFrame();
+    let dt = (now - last) / 1000;
+    last = now;
+    if (!Number.isFinite(dt) || dt < 0) dt = 0;
+    if (dt > 0.1) dt = 0.1; // tab-switch guard — no spiral of death
+    logicAccum += dt * 60 * config.gameSpeed;
+    flickerTime += dt;
 
-    // Layer2 animation — advances when physics ticks
-    if (tickNow) {
+    // --- Fixed-timestep ticks (catch-up capped per frame) ---
+    let ticks = 0;
+    while (logicAccum >= 1.0 && ticks < 5) {
+      logicAccum -= 1.0;
+      ticks++;
+
+      // Layer2 animation — advances with physics ticks
       subFrame = (subFrame + 1) & 3;
       if (subFrame === 0) { frame = (frame + 1) & 3; if (frame === 4) frame = 0; }
-    }
 
-    // --- Player physics (Phase 8) — every physics tick ---
-    if (flag && !player.gameOver && tickNow) {
-      engineMovePlayer(keyboard, curScreenBuff, player, prefs, map, playSfx);
-    }
+      // --- Player physics (Phase 8) — every physics tick ---
+      if (flag && !player.gameOver) {
+        engineMovePlayer(keyboard, curScreenBuff, player, prefs, map, playSfx);
+      }
 
-    // --- Enemy AI + platform riding + collision (Phase 9) ---
-    if (flag && tickNow) {
-      engineMoveEnems(enems, curScreenBuff, prefs, player, nPant, playSfx);
+      // --- Enemy AI + platform riding + collision (Phase 9) ---
+      if (flag) {
+        engineMoveEnems(enems, curScreenBuff, prefs, player, nPant, playSfx);
+      }
+
+      // --- Animation frames (ENGINE.BAS:35-53) — synced with game logic ---
+      if (flag && player && spriteMapping.length > 0) {
+        // Player frame calculation
+        if (player.vy < 0) {
+          // Jumping up
+          player.sprId = spriteMapping[player.facing + 4] ?? player.sprId;
+        } else if (player.vy > 0) {
+          // Falling
+          player.sprId = spriteMapping[player.facing + 5] ?? player.sprId;
+        } else if (player.vx !== 0) {
+          // Walking — cycle frames
+          player.sprId = spriteMapping[player.facing + player.frame] ?? player.sprId;
+          player.subFrame = (player.subFrame + 1) & 3;
+          if (player.subFrame === 0) {
+            player.frame = (player.frame + 1) & 3;
+          }
+        } else {
+          // Standing still
+          player.sprId = spriteMapping[player.facing] ?? player.sprId;
+        }
+      }
+      // Enemy frame calculation (ENGINE.BAS:20-33)
+      for (let i = 0; i < prefs.nEnems; i++) {
+        const e = enems[nPant]?.[i];
+        if (!e || e.t === 0) continue;
+        e.subFrame = (e.subFrame + 1) & 3;
+        if (e.subFrame === 0) e.frame = (e.frame + 1) & 3;
+        e.facing = (e.mx + e.my > 0) ? 0 : 4;
+        const sid = 12 + ((e.t - 1) << 3) + e.facing + e.frame;
+        if (sid < spriteMapping.length) e.sprId = spriteMapping[sid] ?? e.sprId;
+      }
     }
 
     // --- Screen transition ---
@@ -208,48 +249,14 @@ export async function engineDoGame(opts: EngineDoGameOpts): Promise<EngineDoGame
       }
     }
 
-    // --- Animation frames (ENGINE.BAS:35-53) — synced with game logic ---
-    if (flag && tickNow && player && spriteMapping.length > 0) {
-      // Player frame calculation
-      if (player.vy < 0) {
-        // Jumping up
-        player.sprId = spriteMapping[player.facing + 4] ?? player.sprId;
-      } else if (player.vy > 0) {
-        // Falling
-        player.sprId = spriteMapping[player.facing + 5] ?? player.sprId;
-      } else if (player.vx !== 0) {
-        // Walking — cycle frames
-        player.sprId = spriteMapping[player.facing + player.frame] ?? player.sprId;
-        player.subFrame = (player.subFrame + 1) & 3;
-        if (player.subFrame === 0) {
-          player.frame = (player.frame + 1) & 3;
-        }
-      } else {
-        // Standing still
-        player.sprId = spriteMapping[player.facing] ?? player.sprId;
-      }
-    }
-    // Enemy frame calculation (ENGINE.BAS:20-33)
-    if (tickNow) {
-      for (let i = 0; i < prefs.nEnems; i++) {
-        const e = enems[nPant]?.[i];
-        if (!e || e.t === 0) continue;
-        e.subFrame = (e.subFrame + 1) & 3;
-        if (e.subFrame === 0) e.frame = (e.frame + 1) & 3;
-        e.facing = (e.mx + e.my > 0) ? 0 : 4;
-        const sid = 12 + ((e.t - 1) << 3) + e.facing + e.frame;
-        if (sid < spriteMapping.length) e.sprId = spriteMapping[sid] ?? e.sprId;
-      }
-    }
-
     // --- Render ---
     // QB: DQBcopyLayer 2,1 → draw player → draw enems → draw layer2 → draw hotspots → stats → DQBcopyLayer 1,VIDEO
     screen.copyLayer(LAYER_2, LAYER_1);
     if (!player.gameOver) {
       const px = player.x >> 6;
       const py = player.y >> 6;
-      // Flicker state: blink using dedicated frame counter (~7.5 Hz)
-      const showPlayer = player.state === 0 || (flickerFrame & 4) === 0;
+      // Flicker state: blink on wall-clock (~7.5 Hz, 50% duty)
+      const showPlayer = player.state === 0 || (Math.floor(flickerTime * 15) & 1) === 0;
       if (showPlayer) {
         const sid = player.sprId;
         const off = spriteProperties[sid] ?? { offX: 0, offY: 0 };
